@@ -144,8 +144,12 @@ def parse_multiple_choice(text: str, options: list[str]) -> dict[str, float]:
     warning. We map back onto the canonical strings here, not later.
     """
     obj = extract_json_block(text)
-    raw = obj.get("option_probabilities") or obj.get("probabilities") \
-        or obj.get("probability_yes_per_category") or obj.get("options")
+    # "option_probs" FIRST: it is the key MULTIPLE_CHOICE_PROMPT actually demands.
+    # It was missing here originally, so every multiple-choice question paid for a
+    # salvage LLM call it did not need. Caught by the first live sandbox run.
+    raw = (obj.get("option_probs") or obj.get("option_probabilities")
+           or obj.get("probabilities") or obj.get("probability_yes_per_category")
+           or obj.get("options"))
     probs: dict[str, float] = {}
 
     if isinstance(raw, dict):

@@ -106,9 +106,16 @@ class Forecaster:
         if q.type == BINARY:
             return prompts.assemble(prompts.BINARY_PROMPT, BINARY, **shared, **common)
         if q.type == MULTIPLE_CHOICE:
+            # The worked example must carry the REAL option strings. With a
+            # placeholder the model invents its own key names and the forecast
+            # cannot be bound back to the allowed options.
+            n = max(1, len(q.options))
+            even = round(1.0 / n, 3)
+            example = "{" + ", ".join(f'"{o}": {even}' for o in q.options) + "}"
             return prompts.assemble(
                 prompts.MULTIPLE_CHOICE_PROMPT, MULTIPLE_CHOICE, **shared,
-                options="\n".join(f"- {o}" for o in q.options), **common)
+                options="\n".join(f"- {o}" for o in q.options),
+                option_probs_example=example, **common)
         if q.type in (NUMERIC, DISCRETE):
             return prompts.assemble(
                 prompts.NUMERIC_PROMPT, q.type, **shared,

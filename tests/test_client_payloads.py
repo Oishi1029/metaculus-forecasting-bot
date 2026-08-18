@@ -146,3 +146,28 @@ async def test_forecast_type_is_never_sent():
     assert "tournaments=33022" in url
     assert "statuses=open" in url
     await c.aclose()
+
+
+async def test_comment_ledger_queries_private_AND_public():
+    """Verified live 2026-08-18: /comments/?author= EXCLUDES private comments,
+    and we post private ones. A single query makes the bot think it never
+    commented, so it re-comments every run -- and comments accumulate. This is
+    the highest-consequence bug the live smoke test caught."""
+    queries = []
+
+    def handler(request):
+        queries.append(str(request.url))
+        if "users/me" in request.url.path:
+            return httpx.Response(200, json={"id": 307005})
+        priv = "is_private=true" in str(request.url)
+        return httpx.Response(200, json={
+            "results": [{"on_post": 111 if priv else 222}], "next": None})
+
+    c = client_with(handler)
+    seen = await c.commented_post_ids()
+    comment_queries = [q for q in queries if "/comments/" in q]
+    assert len(comment_queries) == 2, "ledger must make BOTH a private and a public pass"
+    assert any("is_private=true" in q for q in comment_queries), "no private pass"
+    assert any("is_private" not in q for q in comment_queries), "no public pass"
+    assert seen == {111, 222}, "ledger must union both result sets"
+    await c.aclose()

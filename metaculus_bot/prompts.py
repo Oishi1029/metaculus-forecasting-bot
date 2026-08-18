@@ -260,16 +260,12 @@ This block is the ONLY authoritative source of your forecast - a downstream dete
 ```json
 {
   "question_type": "multiple_choice",
-  "option_probs": {<REAL option names as JSON keys, evenly-split example probs>}
+  "option_probs": {option_probs_example}
 }
 ```
 
 The `option_probs` object must sum to 1.0 and use the EXACT option names above, in order.
 The LAST thing you write MUST be this fenced ```json block. Write nothing after it.
-
-[BUILD NOTE: the example inside the schema must be generated with the real
-option strings as keys, not "Option_A" placeholders. A parser can only bind
-output to the allowed options when the example carries the exact strings.]
 """
 
 # --- 4. NUMERIC / DISCRETE PROMPT --------------------------------------

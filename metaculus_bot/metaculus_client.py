@@ -220,33 +220,41 @@ class MetaculusClient:
         """Post ids that already carry a comment from THIS bot.
 
         This is the durable half of the ledger. It comes from Metaculus, not
-        from disk, so an ephemeral GitHub runner reconstructs it in one call.
+        from disk, so an ephemeral GitHub runner reconstructs it in one pass.
+
+        🔴 TWO QUERIES ARE REQUIRED, NOT ONE. Verified live on 2026-08-18:
+        GET /comments/?author=<id> silently EXCLUDES private comments, and we
+        post private comments by design. With a single query the bot believes
+        it has never commented and re-comments on every run -- and comments
+        ACCUMULATE where forecasts overwrite, so that is duplicate spam on
+        every question, three times an hour. There is no combined filter:
+        is_private=true returns private, the default returns public, and
+        repeating the parameter returns neither.
         """
         uid = await self.user_id()
         seen: set[int] = set()
-        offset = 0
-        while True:
-            data = await self._request(
-                "GET", "/comments/",
-                params={"author": uid, "limit": 100, "offset": offset},
-            )
-            if not isinstance(data, dict):
-                break
-            page = data.get("results") or []
-            for c in page:
-                pid = c.get("on_post")
-                if pid is None and isinstance(c.get("post"), dict):
-                    pid = c["post"].get("id")
-                if pid is not None:
-                    try:
-                        seen.add(int(pid))
-                    except (TypeError, ValueError):
-                        pass
-            if not page or data.get("next") is None or len(page) < 100:
-                break
-            offset += 100
-            if offset > 20000:
-                break
+        for params_extra in ({"is_private": "true"}, {}):
+            offset = 0
+            while True:
+                params = {"author": uid, "limit": 100, "offset": offset, **params_extra}
+                data = await self._request("GET", "/comments/", params=params)
+                if not isinstance(data, dict):
+                    break
+                page = data.get("results") or []
+                for c in page:
+                    pid = c.get("on_post")
+                    if pid is None and isinstance(c.get("post"), dict):
+                        pid = c["post"].get("id")
+                    if pid is not None:
+                        try:
+                            seen.add(int(pid))
+                        except (TypeError, ValueError):
+                            pass
+                if not page or data.get("next") is None or len(page) < 100:
+                    break
+                offset += 100
+                if offset > 20000:
+                    break
         return seen
 
     # -- writes ---------------------------------------------------------------
