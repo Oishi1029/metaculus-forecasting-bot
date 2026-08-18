@@ -1,0 +1,48 @@
+name: Forecast on tournament questions
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [forecast-now]        # escape hatch: any external scheduler can fire a run
+  schedule:
+    # Three explicit entries, NOT "*/20". GitHub drops */N schedules under load
+    # more readily than discrete ones, and :00 is the busiest minute of the hour.
+    # Tournament questions are open only ~3 hours, so a dropped tick is costly.
+    - cron: "7 * * * *"
+    - cron: "27 * * * *"
+    - cron: "47 * * * *"
+
+concurrency:
+  group: forecast-${{ github.workflow }}
+  cancel-in-progress: false      # never kill a run mid-publish
+
+jobs:
+  forecast:
+    runs-on: ubuntu-latest
+    # MUST stay under the 20-minute tick. Without this a hung LLM call holds the
+    # concurrency group for up to 6 hours and starves ~18 consecutive ticks.
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        id: setup-python
+        with:
+          python-version: "3.11"
+      - uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('requirements.txt') }}
+      - name: Install dependencies
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -q --upgrade pip
+          .venv/bin/pip install -q -r requirements.txt
+      - name: Forecast
+        run: .venv/bin/python main.py --tournament "${{ vars.TOURNAMENT_ID || 'minibench' }}"
+        env:
+          METACULUS_TOKEN:    ${{ secrets.METACULUS_TOKEN }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          ASKNEWS_CLIENT_ID:  ${{ secrets.ASKNEWS_CLIENT_ID }}
+          ASKNEWS_SECRET:     ${{ secrets.ASKNEWS_SECRET }}
+          EXA_API_KEY:        ${{ secrets.EXA_API_KEY }}
+          PROFILE:            ${{ vars.PROFILE || 'competition' }}
