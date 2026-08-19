@@ -2,11 +2,19 @@
 """Entry point. This is the file to open first on the inspection screen-share.
 
     python main.py --tournament minibench
+    python main.py --tournament market-pulse-26q3,minibench
     python main.py --tournament bot-testing-area --profile shakeout --dry-run
 
 There is no interactive path, no confirmation prompt and no approval step
 anywhere in this program. That is deliberate and required: the tournament rules
 state that "Bots may not have a human in the loop when forecasting."
+
+ORDERING IS LOAD-BEARING IN THIS FILE. metaculus_bot.config reads os.environ
+ONCE, at import time. Every environment mutation must therefore happen before
+the first import of anything under metaculus_bot -- including an innocent-looking
+`from metaculus_bot import config` inside a validation branch, which is exactly
+how --force silently became a no-op twice. Hence the literal below and the
+deferred import at the bottom of main().
 """
 
 from __future__ import annotations
@@ -16,6 +24,11 @@ import asyncio
 import logging
 import os
 import sys
+
+# Duplicated from config.TOURNAMENT_SANDBOX on purpose: reading it from config
+# here would import config before the environment is finalised. A test asserts
+# the two stay equal.
+SANDBOX_SLUG = "bot-testing-area"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -29,14 +42,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--dry-run", action="store_true",
                    help="run the full pipeline but publish nothing (local use only)")
     p.add_argument("--limit", type=int, default=0, help="cap questions this run (0 = no cap)")
+    p.add_argument("--force", action="store_true",
+                   help="re-forecast questions already answered. SANDBOX + DRY-RUN ONLY: "
+                        "used to time and cost a profile against real questions. Refuses to "
+                        "run anywhere else, because re-forecasting a tournament question "
+                        "breaks the one-forecast-per-question rule and previewing a "
+                        "tournament forecast breaks the no-human-in-the-loop rule.")
     p.add_argument("--verbose", "-v", action="store_true")
     return p.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    if args.profile:
-        os.environ["PROFILE"] = args.profile
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
@@ -44,12 +61,34 @@ def main(argv: list[str] | None = None) -> int:
         stream=sys.stdout,
     )
     logging.getLogger("httpx").setLevel(logging.WARNING)
-
-    # Imported after PROFILE is set, because config reads the environment once.
-    from metaculus_bot.run import run_tournament
+    log = logging.getLogger("main")
 
     tournaments = [t.strip() for t in str(args.tournament).split(",") if t.strip()]
-    log = logging.getLogger("main")
+    if not tournaments:
+        log.error("no tournament given")
+        return 2
+
+    # ---- every environment mutation happens here, before any package import ----
+    if args.profile:
+        os.environ["PROFILE"] = args.profile
+
+    if args.force:
+        # Two hard gates. The sandbox is unscored and is explicitly where the
+        # rules tell you to iterate; anywhere else, previewing a forecast and
+        # then changing the bot is a disqualifying violation.
+        if not args.dry_run:
+            log.error("--force requires --dry-run. Refusing to run.")
+            return 2
+        if any(t != SANDBOX_SLUG for t in tournaments):
+            log.error("--force is only allowed against %r, got %s. Refusing to run.",
+                      SANDBOX_SLUG, tournaments)
+            return 2
+        os.environ["FORCE_REFORECAST"] = "1"
+        log.warning("--force: re-forecasting already-answered SANDBOX questions, "
+                    "publishing nothing")
+    # ---------------------------------------------------------------------------
+
+    from metaculus_bot.run import run_tournament   # noqa: PLC0415 - see module docstring
 
     async def run_all():
         results = []

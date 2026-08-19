@@ -144,3 +144,45 @@ def test_bounds_default_to_open_when_absent():
 def test_post_id_and_question_id_are_kept_distinct():
     q = parse_post(make_post(29783, 29635))
     assert q.id_of_post == 29783 and q.id_of_question == 29635
+
+
+# --- the --force escape hatch must not be able to touch a tournament ---------
+def test_force_refuses_without_dry_run():
+    import main
+    assert main.main(["--tournament", "bot-testing-area", "--force"]) == 2
+
+
+def test_force_refuses_outside_the_sandbox():
+    import main
+    assert main.main(["--tournament", "minibench", "--force", "--dry-run"]) == 2
+    assert main.main(["--tournament", "bot-testing-area,minibench",
+                      "--force", "--dry-run"]) == 2
+
+
+def test_force_is_never_set_in_ci():
+    wf = (REPO / ".github" / "workflows" / "forecast.yml").read_text()
+    assert "--force" not in wf and "FORCE_REFORECAST" not in wf
+
+
+def test_env_mutations_happen_before_ANY_package_import():
+    """config reads os.environ once at import time, so anything set afterwards is
+    silently ignored. --force was a no-op twice for this reason -- the second
+    time because the guard itself imported config before setting the variable.
+    So assert no metaculus_bot import appears before the last env mutation."""
+    src = (REPO / "main.py").read_text()
+    body = src[src.index("def main("):]
+    last_env = max(body.index('os.environ["FORCE_REFORECAST"]'),
+                   body.index('os.environ["PROFILE"]'))
+    first_import = min((body.index(t) for t in
+                        ("from metaculus_bot", "import metaculus_bot")
+                        if t in body), default=len(body))
+    assert last_env < first_import, (
+        "main.py imports a metaculus_bot module before finalising the environment; "
+        "config would then be loaded with stale values")
+
+
+def test_main_sandbox_literal_matches_config():
+    """main.py duplicates the sandbox slug to avoid importing config too early;
+    the two must not drift apart."""
+    import main as main_mod
+    assert main_mod.SANDBOX_SLUG == config.TOURNAMENT_SANDBOX

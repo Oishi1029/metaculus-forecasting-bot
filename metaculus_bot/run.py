@@ -114,7 +114,8 @@ async def run_tournament(tournament: str | int, *, dry_run: bool = False,
 
         work: list[_PostWork] = []
         for post_id, qs in by_post.items():
-            pending = [q for q in qs if not q.already_forecasted]
+            pending = [q for q in qs
+                       if config.FORCE_REFORECAST or not q.already_forecasted]
             done = [q for q in qs if q.already_forecasted]
             has_comment = post_id in commented
             if not pending and (has_comment or not done):

@@ -146,5 +146,8 @@ HTTP_RATE_LIMIT_PER_S = _env_float("HTTP_RATE_LIMIT_PER_S", 2.0)
 # Hard stop: the bot must never post twice on one question. This is a tournament
 # rule ("only submit one forecast per question"), not merely good hygiene.
 PUBLISH = _env_bool("PUBLISH", True)
+# Set ONLY by main.py's --force, which itself refuses to run outside the sandbox
+# and outside dry-run. Never set this in CI.
+FORCE_REFORECAST = _env_bool("FORCE_REFORECAST", False)
 COMMENT_IS_PRIVATE = _env_bool("COMMENT_IS_PRIVATE", True)
 COMMENT_MAX_CHARS = _env_int("COMMENT_MAX_CHARS", 12000)
