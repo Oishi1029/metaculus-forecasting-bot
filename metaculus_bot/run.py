@@ -163,6 +163,11 @@ async def run_tournament(tournament: str | int, *, dry_run: bool = False,
 
         async def do_question(q: Question) -> tuple[Question, Forecast | None, str]:
             async with sem:
+                # Re-check AFTER acquiring the semaphore. Checking only before it
+                # lets a question that queued for minutes start with no budget
+                # left, then get killed mid-flight by the job timeout.
+                if time.monotonic() - started > config.RUN_DEADLINE_S:
+                    return q, None, "run deadline reached before start"
                 try:
                     fc = await asyncio.wait_for(
                         forecaster.forecast_question(q),

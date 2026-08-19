@@ -256,6 +256,15 @@ def parse_numeric_percentiles(text: str, wanted: list[float]) -> dict[float, flo
 
     if len(out) < 3:
         raise ParseError(f"only {len(out)} usable percentiles parsed (need >= 3)")
+
+    # The prompt tells the model "a partial set cannot be salvaged. All 13 or the
+    # response is discarded." We do NOT discard -- a lost forecast is a zero in a
+    # squared sum, and the CDF builder interpolates a short set correctly. But a
+    # materially short set means the model ignored the contract, so say so: it is
+    # the signal that a prompt or model has drifted.
+    if wanted and len(out) < max(3, len(wanted) // 2):
+        log.warning("model returned %d of %d requested percentiles -- tails will be "
+                    "extrapolated rather than elicited", len(out), len(wanted))
     return out
 
 
