@@ -186,3 +186,24 @@ def test_main_sandbox_literal_matches_config():
     the two must not drift apart."""
     import main as main_mod
     assert main_mod.SANDBOX_SLUG == config.TOURNAMENT_SANDBOX
+
+
+def test_deadlines_fit_inside_the_ci_job_timeout():
+    """A question started just before the run deadline must finish before GitHub
+    kills the job. Otherwise it can be killed BETWEEN the forecast POST and the
+    comment POST, leaving an uncommented forecast -- an eligibility defect."""
+    import re
+    wf = (REPO / ".github" / "workflows" / "forecast.yml").read_text()
+    m = re.search(r"timeout-minutes:\s*(\d+)", wf)
+    assert m, "the forecast workflow must set timeout-minutes"
+    job_s = int(m.group(1)) * 60
+    worst = config.RUN_DEADLINE_S + config.PER_QUESTION_DEADLINE_S
+    assert worst < job_s, (
+        f"worst-case run {worst}s exceeds the {job_s}s job timeout; "
+        "lower RUN_DEADLINE_S or raise timeout-minutes")
+
+
+def test_research_does_not_use_a_flagship_model():
+    """Measured 2026-08-19: routing web search through the flagship timed out on
+    8 of 8 questions, silently halving research sources."""
+    assert config.RESEARCH_MODEL not in config.COMPETITION_MODELS

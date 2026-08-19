@@ -51,7 +51,7 @@ async def check_models() -> dict[str, list[str]]:
     ids = await available_model_ids()
     configured = list(dict.fromkeys(
         config.models_for_profile()
-        + [config.SALVAGE_MODEL, config.PERPLEXITY_MODEL]
+        + [config.SALVAGE_MODEL, config.PERPLEXITY_MODEL, config.RESEARCH_MODEL]
     ))
     if not ids:
         return {"ok": configured, "missing": []}

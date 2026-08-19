@@ -149,8 +149,8 @@ class ResearchRegistry:
             prompts.RESEARCH_PROMPT,
             question_text=question_text, resolution_criteria=resolution_criteria or "N/A",
         )
-        model = config.SHAKEOUT_MODELS[0] if config.PROFILE == "shakeout" else config.COMPETITION_MODELS[0]
-        return await self.llm.complete(model, prompt, web_search=True, max_tokens=2500)
+        return await self.llm.complete(config.RESEARCH_MODEL, prompt,
+                                       web_search=True, max_tokens=2500)
 
     async def _perplexity_via_openrouter(self, question_text: str, resolution_criteria: str) -> str:
         prompt = prompts.render(

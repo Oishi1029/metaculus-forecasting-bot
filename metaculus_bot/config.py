@@ -81,6 +81,13 @@ SALVAGE_MODEL = _env("SALVAGE_MODEL", "openai/gpt-5.6-luna")
 # for the price of the key we already have. NOTE: "perplexity/sonar-reasoning"
 # does NOT exist and returns 404; the reasoning variant is "-reasoning-pro".
 # Verified live 2026-08-19.
+# Web research uses a FAST, CHEAP model, never the flagship. Measured 2026-08-19:
+# routing the web-search call through gpt-5.6-sol timed out on 8 of 8 questions
+# at 90s, so every question silently lost one of only two research sources --
+# and source diversity is the strongest evidenced predictor of score. Searching
+# and summarising does not need a frontier reasoning model.
+RESEARCH_MODEL = _env("RESEARCH_MODEL", "openai/gpt-5.6-luna")
+
 PERPLEXITY_MODEL = _env(
     "PERPLEXITY_MODEL",
     "perplexity/sonar" if _env("PROFILE", "competition").lower() == "shakeout"
@@ -118,7 +125,7 @@ NUMERIC_PERCENTILES = [1, 2.5, 5, 10, 20, 40, 50, 60, 80, 90, 95, 97.5, 99]
 # --- Research ----------------------------------------------------------------
 RESEARCH_ENABLED = _env_bool("RESEARCH_ENABLED", True)
 RESEARCH_GAP_FILL = _env_bool("RESEARCH_GAP_FILL", PROFILE != "shakeout")
-RESEARCH_TIMEOUT_S = _env_float("RESEARCH_TIMEOUT_S", 90.0)
+RESEARCH_TIMEOUT_S = _env_float("RESEARCH_TIMEOUT_S", 120.0)
 RESEARCH_MAX_CHARS = _env_int("RESEARCH_MAX_CHARS", 24000)
 # AskNews free tier: 1,000 calls/month, 4,000 total. "latest news" costs 1 unit,
 # archive ("news knowledge") costs 5. Archive is OFF by default to protect quota.
@@ -126,12 +133,15 @@ ASKNEWS_USE_ARCHIVE = _env_bool("ASKNEWS_USE_ARCHIVE", False)
 ASKNEWS_ARTICLES = _env_int("ASKNEWS_ARTICLES", 6)
 # OpenRouter's native web plugin, used as a research source that needs no extra key.
 WEB_PLUGIN_ENABLED = _env_bool("WEB_PLUGIN_ENABLED", True)
-WEB_PLUGIN_MAX_RESULTS = _env_int("WEB_PLUGIN_MAX_RESULTS", 5 if PROFILE == "shakeout" else 15)
+WEB_PLUGIN_MAX_RESULTS = _env_int("WEB_PLUGIN_MAX_RESULTS", 5 if PROFILE == "shakeout" else 10)
 
 # --- Run shape ---------------------------------------------------------------
-# The GitHub Actions tick is 20 minutes and the job times out at 18. We stop
-# STARTING new questions at 16 so there is always time to publish what we have.
-RUN_DEADLINE_S = _env_float("RUN_DEADLINE_S", 16 * 60)
+# INVARIANT: RUN_DEADLINE_S + PER_QUESTION_DEADLINE_S must stay under the
+# workflow's timeout-minutes (18), or a question started just before the run
+# deadline can still be running when GitHub kills the job -- potentially between
+# the forecast POST and the comment POST, leaving an uncommented forecast.
+# 10 + 7 = 17 minutes, one minute of headroom. Enforced by a test.
+RUN_DEADLINE_S = _env_float("RUN_DEADLINE_S", 10 * 60)
 PER_QUESTION_DEADLINE_S = _env_float("PER_QUESTION_DEADLINE_S", 420.0)
 MAX_CONCURRENT_QUESTIONS = _env_int("MAX_CONCURRENT_QUESTIONS", 6)
 MAX_QUESTIONS_PER_RUN = _env_int("MAX_QUESTIONS_PER_RUN", 0)  # 0 = no cap
