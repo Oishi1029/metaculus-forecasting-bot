@@ -91,3 +91,36 @@ async def test_credit_returns_none_when_unreachable(monkeypatch):
                         lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
     monkeypatch.setattr(pf.config, "OPENROUTER_API_KEY", "k")
     assert await pf.openrouter_credit() is None
+
+
+def test_asknews_registers_only_when_both_credentials_present():
+    """VERIFIED live 2026-08-19 against a real key: OAuth2 client_credentials at
+    https://auth.asknews.app/oauth2/token with scope=news, then
+    GET /v1/news/search with strategy="latest news" -> usable text at the
+    response key "as_string", and usage.credits == 1 (the cheap strategy).
+    AskNews needs BOTH id and secret; registering on one is a guaranteed 401
+    that silently costs a research source."""
+    import importlib
+    from metaculus_bot import research as rmod
+    from metaculus_bot import config as cmod
+
+    class _FakeLLM:
+        pass
+
+    for cid, sec, expect in (("id", "sec", True), ("id", "", False),
+                             ("", "sec", False), ("", "", False)):
+        old_id, old_sec = cmod.ASKNEWS_CLIENT_ID, cmod.ASKNEWS_SECRET
+        cmod.ASKNEWS_CLIENT_ID, cmod.ASKNEWS_SECRET = cid, sec
+        try:
+            reg = rmod.ResearchRegistry(_FakeLLM())
+            assert ("asknews" in reg.provider_names) is expect, (cid, sec)
+        finally:
+            cmod.ASKNEWS_CLIENT_ID, cmod.ASKNEWS_SECRET = old_id, old_sec
+
+
+def test_archive_strategy_stays_off_by_default():
+    """The archive strategy costs 5 quota credits per call against a 1,000/month
+    and 4,000-total tournament allowance; latest-news costs 1 (measured:
+    usage.credits == 1). A 57-question round is ~57 credits, not ~285."""
+    from metaculus_bot import config
+    assert config.ASKNEWS_USE_ARCHIVE is False

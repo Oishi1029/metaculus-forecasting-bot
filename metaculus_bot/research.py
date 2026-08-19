@@ -166,9 +166,13 @@ class ResearchRegistry:
         QUOTA DISCIPLINE: the tournament free tier is 1,000 calls/month and 4,000
         total. strategy="latest news" costs 1 unit; strategy="news knowledge"
         (the archive) costs 5, and is therefore OFF unless ASKNEWS_USE_ARCHIVE=1.
-        NOTE: this path is written from Metaculus' SDK usage but has NOT been
-        exercised against a live key. It fails soft, so a wrong parameter costs
-        one source, never the question.
+        VERIFIED LIVE 2026-08-19 against a real tournament key: OAuth2
+        client_credentials -> https://auth.asknews.app/oauth2/token (scope=news,
+        HTTP Basic, 2h token), then GET /v1/news/search with
+        strategy="latest news" and return_type="string". The usable text is at
+        the response key "as_string", and the response reports usage.credits == 1,
+        confirming the cheap strategy. Still fails soft: a provider failing must
+        cost one source, never the question.
         """
         async with httpx.AsyncClient(timeout=45.0) as client:
             tok = await client.post(
