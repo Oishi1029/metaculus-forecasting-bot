@@ -188,15 +188,34 @@ class ResearchRegistry:
             out: list[str] = []
             hot = await client.get(
                 "https://api.asknews.app/v1/news/search",
-                params={"query": question_text, "n_articles": config.ASKNEWS_ARTICLES,
-                        "return_type": "string", "strategy": "latest news"},
+                params={
+                    "query": question_text,
+                    "n_articles": config.ASKNEWS_ARTICLES,
+                    "return_type": "string",
+                    "strategy": "latest news",
+                    # historical is the ACTUAL 1-vs-5 credit switch; "latest news"
+                    # is documented to set it False implicitly, but sending it
+                    # explicitly means a change to the strategy defaults upstream
+                    # can never quintuple our billing without us noticing.
+                    "historical": "false",
+                    # Cached responses bill at 0.25x. Our catch-up scans re-research
+                    # a question whenever a previous tick failed on it, so this is a
+                    # real saving; 1h is short enough that the news is still fresh
+                    # for a question whose window is only ~3 hours.
+                    "try_cache": "1h",
+                },
                 headers=headers,
             )
             if hot.status_code < 300:
-                out.append("Latest news (last 48h):\n" + _asknews_text(hot.json()))
+                payload = hot.json()
+                _log_credits(payload, "latest")
+                out.append("Latest news (last 48h):\n" + _asknews_text(payload))
+            else:
+                log.warning("asknews hot search -> HTTP %s: %s",
+                            hot.status_code, (hot.text or "")[:160])
 
             if config.ASKNEWS_USE_ARCHIVE:
-                await asyncio.sleep(10)   # free tier: 1 call / 10s
+                await asyncio.sleep(10)   # free tier is rate limited
                 arch = await client.get(
                     "https://api.asknews.app/v1/news/search",
                     params={"query": question_text, "n_articles": 10,
@@ -204,7 +223,11 @@ class ResearchRegistry:
                     headers=headers,
                 )
                 if arch.status_code < 300:
-                    out.append("Archive (past ~160 days):\n" + _asknews_text(arch.json()))
+                    payload = arch.json()
+                    _log_credits(payload, "archive")
+                    # 60 days, not 160 -- the "160" in Metaculus' own SDK comment
+                    # is stale against the live API spec.
+                    out.append("Archive (past ~60 days):\n" + _asknews_text(payload))
             return "\n\n".join(out)
 
     async def _exa(self, question_text: str, resolution_criteria: str) -> str:
@@ -227,6 +250,18 @@ class ResearchRegistry:
                 body = " ".join(r.get("highlights") or []) or (r.get("text") or "")[:800]
                 parts.append(f"- {title} ({date}) {url}\n  {body}")
             return "\n".join(parts)
+
+
+def _log_credits(payload: Any, label: str) -> None:
+    """Surface what a call actually cost. The free tournament tier is 1,000/month
+    and 4,000 total, and the difference between the hot and archive paths is 5x,
+    so silent overspend is a real way to run out mid-round."""
+    try:
+        credits = (payload or {}).get("usage", {}).get("credits")
+        if credits is not None:
+            log.info("asknews %s search cost %s credit(s)", label, credits)
+    except Exception:                                     # noqa: BLE001
+        pass
 
 
 def _asknews_text(payload: Any) -> str:
