@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 
 from . import comment as comment_mod
 from . import config
+from . import preflight
 from .forecaster import Forecaster
 from .llm import LLMClient
 from .metaculus_client import MetaculusClient, MetaculusError
@@ -81,7 +82,13 @@ async def run_tournament(tournament: str | int, *, dry_run: bool = False,
     llm = LLMClient()
     research = ResearchRegistry(llm)
     log.info("%s", research.describe())
-    log.info("ensemble: %s", ", ".join(config.models_for_profile()))
+
+    # Validate model ids against OpenRouter's catalogue before spending anything.
+    # A retired id fails every call while the run still reports success, which is
+    # silent score loss -- see preflight.py for the case that motivated this.
+    checked = await preflight.check_models()
+    models = preflight.usable_ensemble(config.models_for_profile(), checked["missing"])
+    log.info("ensemble: %s", ", ".join(models))
 
     async with MetaculusClient() as client:
         me = await client.user_id()
@@ -130,7 +137,7 @@ async def run_tournament(tournament: str | int, *, dry_run: bool = False,
             await llm.aclose()
             return summary
 
-        forecaster = Forecaster(llm, research)
+        forecaster = Forecaster(llm, research, models=models)
         sem = asyncio.Semaphore(config.MAX_CONCURRENT_QUESTIONS)
 
         async def do_question(q: Question) -> tuple[Question, Forecast | None, str]:

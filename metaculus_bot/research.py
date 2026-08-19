@@ -157,7 +157,7 @@ class ResearchRegistry:
             prompts.RESEARCH_PROMPT,
             question_text=question_text, resolution_criteria=resolution_criteria or "N/A",
         )
-        model = "perplexity/sonar" if config.PROFILE == "shakeout" else "perplexity/sonar-reasoning"
+        model = config.PERPLEXITY_MODEL
         return await self.llm.complete(model, prompt, max_tokens=2000, max_retries=1)
 
     async def _asknews(self, question_text: str, resolution_criteria: str) -> str:

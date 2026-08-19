@@ -77,6 +77,16 @@ SHAKEOUT_MODELS = [
 # Small, cheap model used ONLY to salvage an unparseable forecast block.
 SALVAGE_MODEL = _env("SALVAGE_MODEL", "openai/gpt-5.6-luna")
 
+# Perplexity reached THROUGH OpenRouter -- a second, independent search index
+# for the price of the key we already have. NOTE: "perplexity/sonar-reasoning"
+# does NOT exist and returns 404; the reasoning variant is "-reasoning-pro".
+# Verified live 2026-08-19.
+PERPLEXITY_MODEL = _env(
+    "PERPLEXITY_MODEL",
+    "perplexity/sonar" if _env("PROFILE", "competition").lower() == "shakeout"
+    else "perplexity/sonar-pro",
+)
+
 PROFILE = _env("PROFILE", "competition").lower()   # "competition" | "shakeout"
 
 
