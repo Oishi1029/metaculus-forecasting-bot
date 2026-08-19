@@ -87,6 +87,25 @@ class LLMClient:
                     # 4xx other than 429 will not improve on retry.
                     if resp.status_code != 429 and resp.status_code < 500:
                         raise LLMError(f"{model} -> HTTP {resp.status_code}: {text}")
+                    if resp.status_code == 429:
+                        # Honour Retry-After. A generic exponential backoff is far
+                        # too short for a per-model RPM cap, and giving up drops a
+                        # whole research source or ensemble member.
+                        ra = resp.headers.get("Retry-After")
+                        delay = None
+                        if ra:
+                            try:
+                                delay = min(float(ra), 90.0)
+                            except ValueError:
+                                delay = None
+                        if delay is None:
+                            delay = min(15.0 * (2 ** attempt), 90.0)
+                        log.warning("%s rate-limited (429); waiting %.0fs", model, delay)
+                        if attempt >= max_retries:
+                            raise LLMError(f"{model} rate-limited after "
+                                           f"{max_retries + 1} attempts")
+                        await asyncio.sleep(delay + random.uniform(0, 2.0))
+                        continue
                     raise httpx.HTTPError(f"HTTP {resp.status_code}: {text}")
                 data = resp.json()
                 choices = data.get("choices") or []

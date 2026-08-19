@@ -511,3 +511,26 @@ def unresolved_tokens(text: str) -> list[str]:
     """Any {lower_snake_case} left over is a substitution we forgot. Used in tests."""
     import re
     return sorted(set(re.findall(r"\{([a-z_][a-z0-9_]{2,})\}", text)))
+
+
+# --- title-only questions ------------------------------------------------------
+# VERIFIED 2026-08-19 against the last settled MiniBench round: 57/57 questions
+# had EMPTY resolution_criteria, description and fine_print. The title is the
+# entire specification. Telling the model to "paraphrase the resolution criteria"
+# when there are none invites it to invent them, and inventing a stricter reading
+# than intended is a systematic bias, not noise.
+TITLE_ONLY_NOTE = """
+IMPORTANT - THIS QUESTION HAS NO SEPARATE RESOLUTION TEXT.
+The title above is the COMPLETE and ONLY specification. There is no description,
+no resolution criteria section and no fine print to consult; their absence is
+normal for this tournament and is not missing information.
+Therefore:
+- Read the title literally and resolve ambiguity toward the PLAIN, ORDINARY
+  reading a well-informed person would take, not the most technical one.
+- Do NOT invent extra conditions, thresholds or exclusions the title does not
+  state. Inventing a stricter reading biases every forecast in one direction.
+- Where the title names a source, an agency or a metric, that is the resolver.
+- Where it gives a deadline, the deadline is exactly as written.
+- If a genuine ambiguity remains, state your reading in one line and forecast
+  under it rather than hedging toward 50%.
+"""

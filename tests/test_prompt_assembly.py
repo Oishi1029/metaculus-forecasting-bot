@@ -210,3 +210,26 @@ def test_nominal_bounds_fall_back_to_range_when_absent():
                     "inbound_outcome_count": 200}}}
     q = parse_post_questions(post)[0]
     assert q.nominal_min == 0 and q.nominal_max == 100
+
+
+# --- title-only questions (S8) ----------------------------------------------
+def test_title_only_question_gets_an_explicit_instruction():
+    """VERIFIED against the last settled MiniBench round: 57/57 questions had
+    EMPTY resolution_criteria, description and fine_print. Passing the literal
+    word "none" invites the model to invent criteria, and an invented stricter
+    reading biases every forecast one way."""
+    q = q_of(BINARY)
+    q.resolution_criteria = ""
+    q.background = ""
+    text = _Bare()._build_prompt(q, "research")
+    assert "COMPLETE and ONLY specification" in text
+    assert "Do NOT invent extra conditions" in text
+    assert "(none given)" not in text
+
+
+def test_question_with_real_criteria_is_unchanged():
+    q = q_of(BINARY)
+    q.resolution_criteria = "Resolves YES if the CPI print exceeds 3.0%."
+    text = _Bare()._build_prompt(q, "r")
+    assert "Resolves YES if the CPI print exceeds 3.0%." in text
+    assert "COMPLETE and ONLY specification" not in text

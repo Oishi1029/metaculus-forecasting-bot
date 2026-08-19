@@ -87,11 +87,19 @@ class Forecaster:
         substitution leaves unknown braces alone, which is what we want.
         """
         elapsed, remaining = _window_days(q)
+        # MiniBench ships title-only questions (verified: 57/57 of the last round
+        # had no criteria, description or fine print). Substitute an explicit
+        # instruction rather than the word "none", which reads as missing data.
+        title_only = not (q.resolution_criteria or "").strip() and not (q.background or "").strip()
         common = dict(
             question_text=q.display_title,
-            resolution_criteria=q.resolution_criteria or "(none given)",
+            resolution_criteria=(q.resolution_criteria.strip()
+                                 if (q.resolution_criteria or "").strip()
+                                 else prompts.TITLE_ONLY_NOTE),
             fine_print=q.fine_print or "(none)",
-            background_info=q.background or "(none)",
+            background_info=(q.background.strip() if (q.background or "").strip()
+                             else ("(none - see the note under resolution criteria)"
+                                   if title_only else "(none)")),
             research=research or "(no external research was available; rely on your own "
                                  "knowledge and say so explicitly)",
         )
@@ -171,7 +179,9 @@ class Forecaster:
                 raise ForecastFailure("no parseable percentiles from any model")
             merged = aggregate.aggregate_percentiles(sets)
             cdf = build_continuous_cdf(merged, q.cdf_metadata())
-            median = merged.get(50.0) or merged[sorted(merged)[len(merged) // 2]]
+            # `or` treats a legitimate median of 0 (or 0.0%) as missing.
+            median = (merged[50.0] if 50.0 in merged
+                      else merged[sorted(merged)[len(merged) // 2]])
             unit = f" {q.unit}" if q.unit else ""
             return {"continuous_cdf": cdf}, f"median {_fmt(median)}{unit}"
 

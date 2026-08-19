@@ -151,3 +151,9 @@ def test_even_multiple_choice_uses_median_low():
     out = aggregate.aggregate_multiple_choice(
         [{"A": 0.9, "B": 0.1}, {"A": 0.1, "B": 0.9}], ["A", "B"])
     assert sum(out.values()) == pytest.approx(1.0)
+
+
+def test_median_of_zero_is_not_treated_as_missing():
+    """`x or fallback` swallows a legitimate median of 0."""
+    merged = aggregate.aggregate_percentiles([{10: -5.0, 50: 0.0, 90: 5.0}])
+    assert merged[50.0] == 0.0
