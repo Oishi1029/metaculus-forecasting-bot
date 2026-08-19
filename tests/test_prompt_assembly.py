@@ -168,3 +168,45 @@ def test_numeric_prompt_ends_with_the_json_contract():
     text = _Bare()._build_prompt(q_of(NUMERIC), "r")
     tail = text.rstrip()[-400:]
     assert "json" in tail.lower()
+
+
+# --- number formatting (S4/S5) ----------------------------------------------
+def test_bounds_are_never_scientific_or_rounded():
+    """`.4g` produced '4.8e+04' from 48000 and CHANGED 1359.5 into 1,360 -- into a
+    prompt whose own Units section forbids scientific notation, and into the
+    published comment. A rounded bound is a wrong bound."""
+    from metaculus_bot.forecaster import _fmt
+    assert _fmt(48000.0) == "48,000"
+    assert _fmt(7000000.0) == "7,000,000"
+    assert _fmt(240500.0) == "240,500"
+    assert _fmt(1359.5) == "1,359.5"
+    assert _fmt(2462.5) == "2,462.5"
+    assert _fmt(-0.105) == "-0.105"
+    for v in (48000.0, 7000000.0, 240500.0, 1359.5, 1e10):
+        assert "e" not in _fmt(v).lower()
+
+
+def test_nominal_bounds_are_used_for_elicitation():
+    """The CDF grid runs half a step outside the real answer space. Telling the
+    model the number of jurisdictions could be 5.5 is nonsense."""
+    from metaculus_bot.models import parse_post_questions
+    post = {"id": 1, "question": {
+        "id": 2, "type": "discrete", "status": "open", "title": "How many?",
+        "open_lower_bound": False, "open_upper_bound": False,
+        "scaling": {"range_min": 5.5, "range_max": 13.5, "zero_point": None,
+                    "nominal_min": 6, "nominal_max": 13, "inbound_outcome_count": 8}}}
+    q = parse_post_questions(post)[0]
+    assert q.nominal_min == 6 and q.nominal_max == 13
+    assert q.range_min == 5.5 and q.range_max == 13.5   # grid unchanged
+    text = _Bare()._build_prompt(q, "r")
+    assert "5.5" not in text and "13.5" not in text
+
+
+def test_nominal_bounds_fall_back_to_range_when_absent():
+    from metaculus_bot.models import parse_post_questions
+    post = {"id": 1, "question": {
+        "id": 2, "type": "numeric", "status": "open", "title": "How much?",
+        "scaling": {"range_min": 0, "range_max": 100, "zero_point": None,
+                    "inbound_outcome_count": 200}}}
+    q = parse_post_questions(post)[0]
+    assert q.nominal_min == 0 and q.nominal_max == 100

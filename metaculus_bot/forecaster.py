@@ -121,7 +121,7 @@ class Forecaster:
                 prompts.NUMERIC_PROMPT, q.type, **shared,
                 unit_str=q.unit or "(not stated -- infer from the question)",
                 lower=_fmt(q.range_min), upper=_fmt(q.range_max),
-                nom_lower=_fmt(q.range_min), nom_upper=_fmt(q.range_max),
+                nom_lower=_fmt(q.nominal_min), nom_upper=_fmt(q.nominal_max),
                 lower_bound_message=_bound_message(q, upper=False),
                 upper_bound_message=_bound_message(q, upper=True),
                 **common)
@@ -224,11 +224,20 @@ def _today() -> str:
 
 
 def _fmt(v: float | None) -> str:
+    """Format a bound for the prompt: never exponential, never value-changing.
+
+    `.4g` was doing both. Measured: 48000.0 -> '4.8e+04' and 1359.5 -> '1,360'.
+    The numeric prompt's own Units section forbids scientific notation, and a
+    rounded bound is simply a WRONG bound -- we were telling the model the range
+    ended at 2,462 when it ended at 2462.5.
+    """
     if v is None:
         return "unknown"
-    if abs(v) >= 1e6 or (v != 0 and abs(v) < 1e-3):
-        return f"{v:.4g}"
-    return f"{v:,.4g}"
+    if v != int(v):
+        out = f"{v:,.6f}".rstrip("0").rstrip(".")
+    else:
+        out = f"{int(v):,d}"
+    return out or "0"
 
 
 def _bound_message(q: Question, *, upper: bool) -> str:
@@ -240,7 +249,7 @@ def _bound_message(q: Question, *, upper: bool) -> str:
     mechanism.
     """
     if upper:
-        val = _fmt(q.range_max)
+        val = _fmt(q.nominal_max)
         if q.open_upper_bound:
             return (
                 f"The upper bound is open: {val} is the top of the displayed range, not a hard "
@@ -252,7 +261,7 @@ def _bound_message(q: Question, *, upper: bool) -> str:
                 f"sit inside the range. Do not pile percentiles at the boundary."
             )
         return f"The upper bound is closed: the outcome can not be higher than {val}."
-    val = _fmt(q.range_min)
+    val = _fmt(q.nominal_min)
     if q.open_lower_bound:
         return (
             f"The lower bound is open: {val} is the bottom of the displayed range, not a hard "

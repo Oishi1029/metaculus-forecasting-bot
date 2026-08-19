@@ -78,23 +78,45 @@ def usable_ensemble(models: list[str], missing: list[str]) -> list[str]:
 
 
 async def openrouter_credit(timeout: float = 15.0) -> float | None:
-    """Remaining credit on the key, or None if it cannot be determined.
+    """Spendable credit: the MINIMUM of the account balance and the key's own cap.
 
-    Running out of credit mid-round is the worst failure shape available: the
-    tail of the question list silently becomes zeros, and because prize share is
-    proportional to the SQUARE of the summed score, losing the last stretch costs
-    far more than proportionally. Cheap to check, so check.
+    Two different numbers, and either can bind. /api/v1/key reports
+    `limit_remaining`, which is only the KEY's monthly cap minus its usage -- it
+    knows nothing about whether the account has money. Measured 2026-08-19: key
+    said $62.93 remaining while the account held $42.93. Trusting the key figure
+    would let the bot start a round it cannot pay to finish, and the tail of an
+    unfinished round is zeros in a SQUARED sum.
     """
     if not config.OPENROUTER_API_KEY:
         return None
+    headers = {"Authorization": f"Bearer {config.OPENROUTER_API_KEY}"}
+    balance = cap = None
     try:
         async with httpx.AsyncClient(timeout=timeout) as c:
-            r = await c.get("https://openrouter.ai/api/v1/key",
-                            headers={"Authorization": f"Bearer {config.OPENROUTER_API_KEY}"})
-            r.raise_for_status()
-            d = (r.json() or {}).get("data") or {}
-            rem = d.get("limit_remaining")
-            return float(rem) if rem is not None else None
+            try:
+                r = await c.get("https://openrouter.ai/api/v1/credits", headers=headers)
+                r.raise_for_status()
+                d = (r.json() or {}).get("data") or {}
+                if d.get("total_credits") is not None:
+                    balance = float(d["total_credits"]) - float(d.get("total_usage") or 0)
+            except Exception as exc:                      # noqa: BLE001
+                log.warning("could not read OpenRouter balance (%s)", exc)
+            try:
+                r = await c.get("https://openrouter.ai/api/v1/key", headers=headers)
+                r.raise_for_status()
+                d = (r.json() or {}).get("data") or {}
+                if d.get("limit_remaining") is not None:
+                    cap = float(d["limit_remaining"])
+            except Exception as exc:                      # noqa: BLE001
+                log.warning("could not read OpenRouter key cap (%s)", exc)
     except Exception as exc:                              # noqa: BLE001
-        log.warning("could not read OpenRouter credit (%s); continuing", exc)
+        log.warning("could not reach OpenRouter (%s); continuing", exc)
         return None
+
+    vals = [v for v in (balance, cap) if v is not None]
+    if not vals:
+        return None
+    if balance is not None and cap is not None and abs(balance - cap) > 0.01:
+        log.info("OpenRouter: account balance $%.2f, key cap remaining $%.2f "
+                 "-- using the lower", balance, cap)
+    return min(vals)

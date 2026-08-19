@@ -117,3 +117,37 @@ def test_P1_survives_a_0_to_1_percentile_dict():
     out = parse_numeric_percentiles(
         '```json\n{"declared_percentiles":{"0.01":5,"0.1":8,"0.5":20,"0.99":95}}\n```', [])
     assert out[1.0] == 5.0 and out[99.0] == 95.0
+
+
+# --- ratio prose must never become a probability (S7) ------------------------
+@pytest.mark.parametrize("prose", ['"1 in 5"', '"roughly 1 chance in 20"',
+                                   '"about 7 in 10"', '"1/5"', '"1 out of 20"'])
+def test_ratio_prose_is_rejected_not_misread(prose):
+    """Grabbing the first number turned "1 in 5" into 1.0, which the [0.02,0.98]
+    clamp then passed through as 0.98 -- a 20% belief published as 98%. The clamp
+    cannot catch it because 0.98 is inside the band."""
+    text = '```json\n{"question_type":"binary","posterior_prob":%s}\n```' % prose
+    try:
+        got = parse_binary(text)
+    except ParseError:
+        return                      # rejected outright: correct
+    assert got < 0.9, f"{prose} misread as {got}"
+
+
+def test_plain_numeric_strings_still_parse():
+    assert parse_binary('```json\n{"posterior_prob":"0.35"}\n```') == pytest.approx(0.35)
+    assert parse_binary('```json\n{"posterior_prob":"35%"}\n```') == pytest.approx(0.35)
+
+
+# --- an even ensemble must not readmit the outlier (S6) ----------------------
+def test_even_ensemble_uses_median_low():
+    """statistics.median averages the two middle values, handing an outlier half
+    the weight -- precisely what the median was chosen to prevent."""
+    assert aggregate.aggregate_binary([0.90, 0.03]) == pytest.approx(0.03)
+    assert aggregate.aggregate_binary([0.90, 0.85, 0.03]) == pytest.approx(0.85)
+
+
+def test_even_multiple_choice_uses_median_low():
+    out = aggregate.aggregate_multiple_choice(
+        [{"A": 0.9, "B": 0.1}, {"A": 0.1, "B": 0.9}], ["A", "B"])
+    assert sum(out.values()) == pytest.approx(1.0)

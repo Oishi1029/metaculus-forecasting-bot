@@ -19,6 +19,11 @@ log = logging.getLogger(__name__)
 
 _FENCED = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL | re.IGNORECASE)
 _BARE_OBJ = re.compile(r"\{[^{}]*\"question_type\"[^{}]*\}", re.DOTALL)
+# "1 in 5", "1 out of 20", "1/5" -- prose the naive first-number grab misreads.
+_RATIO_PROSE = re.compile(r"\bin\b|\bout of\b|/", re.IGNORECASE)
+# Allows an intervening noun: "1 chance in 20", "1 case out of 20".
+_RATIO = re.compile(
+    r"(\d+(?:\.\d+)?)\s*(?:[a-z]+\s+)?(?:in|out\s+of|/)\s*(\d+(?:\.\d+)?)", re.IGNORECASE)
 
 
 class ParseError(ValueError):
@@ -100,7 +105,15 @@ def parse_binary(text: str) -> float:
     """Return P(yes) in (0, 1)."""
     try:
         obj = extract_json_block(text)
-        p = _as_float(obj.get("posterior_prob"))
+        raw_p = obj.get("posterior_prob")
+        # "1 in 5" would take the FIRST number -> 1.0 -> clamped to 0.98, i.e. a
+        # 20% belief published as 98%. The clamp cannot catch it because 0.98 is
+        # inside the band -- the exact catastrophic failure the clamp exists for.
+        # Interpreting the ratio beats discarding it: a lost forecast is a zero
+        # in a squared sum, so 0.2 is better than both 0.98 and nothing.
+        p = _ratio_to_prob(raw_p) if isinstance(raw_p, str) else None
+        if p is None:
+            p = _as_float(raw_p)
         if p is None:
             for k in ("probability", "prob", "p_yes", "probability_yes", "final_probability"):
                 p = _as_float(obj.get(k))
@@ -110,6 +123,8 @@ def parse_binary(text: str) -> float:
         p = None
 
     if p is None:
+        p = _ratio_to_prob(text[-400:])
+    if p is None:
         p = _loose_binary(text)
     if p is None:
         raise ParseError("no binary probability found")
@@ -118,6 +133,22 @@ def parse_binary(text: str) -> float:
     if not (0.0 <= p <= 1.0):
         raise ParseError(f"binary probability out of range: {p}")
     return p
+
+
+def _ratio_to_prob(v: str) -> float | None:
+    """Turn "1 in 5" / "1 out of 20" / "1/5" into a probability, or None."""
+    if not _RATIO_PROSE.search(v):
+        return None
+    m = _RATIO.search(v.replace(",", ""))
+    if not m:
+        return None
+    try:
+        num, den = float(m.group(1)), float(m.group(2))
+    except ValueError:
+        return None
+    if den <= 0 or num < 0 or num > den:
+        return None
+    return num / den
 
 
 def _loose_binary(text: str) -> float | None:

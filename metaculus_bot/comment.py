@@ -186,11 +186,15 @@ def _value_at(cdf: list[float], target: float, q) -> str:
         val = lo + (hi - lo) * (ratio ** loc - 1) / (ratio - 1) if ratio != 1 else lo + (hi - lo) * loc
     else:
         val = lo + (hi - lo) * loc
+    # Same lossy .4g as the prompt formatter had, on the prize-eligibility
+    # artifact itself. Measured live: "median 9.27e+10 $" in a published comment.
+    def _n(x: float) -> str:
+        return f"{x:,.4f}".rstrip("0").rstrip(".") if x != int(x) else f"{int(x):,d}"
     if idx == 0 and q.open_lower_bound:
-        return f"< {val:,.4g}"
+        return f"< {_n(val)}"
     if idx == n - 1 and q.open_upper_bound:
-        return f"> {val:,.4g}"
-    return f"{val:,.4g}"
+        return f"> {_n(val)}"
+    return _n(val)
 
 
 def _best_rationale(fc: Forecast) -> str:

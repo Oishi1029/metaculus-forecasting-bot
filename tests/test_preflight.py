@@ -55,3 +55,39 @@ def test_perplexity_model_id_is_not_the_dead_one():
     assert config.PERPLEXITY_MODEL != "perplexity/sonar-reasoning", \
         "that id 404s; the reasoning variant is perplexity/sonar-reasoning-pro"
     assert config.PERPLEXITY_MODEL.startswith("perplexity/")
+
+
+async def test_credit_uses_the_lower_of_balance_and_key_cap(monkeypatch):
+    """/key reports the KEY's monthly cap minus usage; it knows nothing about
+    whether the account has money. Measured 2026-08-19: key said $62.93 while the
+    account held $42.93. Trusting the higher number lets the bot start a round it
+    cannot finish, and an unfinished round's tail is zeros in a squared sum."""
+    import httpx
+    from metaculus_bot import preflight as pf
+
+    def handler(request):
+        if request.url.path.endswith("/credits"):
+            return httpx.Response(200, json={"data": {"total_credits": 60, "total_usage": 17.07}})
+        return httpx.Response(200, json={"data": {"limit_remaining": 62.93, "limit": 80}})
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient",
+                        lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    monkeypatch.setattr(pf.config, "OPENROUTER_API_KEY", "k")
+    got = await pf.openrouter_credit()
+    assert got == pytest.approx(42.93, abs=0.01), f"took the wrong number: {got}"
+
+
+async def test_credit_returns_none_when_unreachable(monkeypatch):
+    """A lookup outage must never stop the bot forecasting."""
+    import httpx
+    from metaculus_bot import preflight as pf
+
+    def handler(request):
+        raise httpx.ConnectError("down")
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient",
+                        lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    monkeypatch.setattr(pf.config, "OPENROUTER_API_KEY", "k")
+    assert await pf.openrouter_credit() is None

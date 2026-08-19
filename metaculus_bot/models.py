@@ -42,6 +42,12 @@ class Question:
     range_min: float | None = None
     range_max: float | None = None
     zero_point: float | None = None
+    # The DISPLAYED domain, which is not the CDF grid. On a discrete question the
+    # grid runs [5.5, 13.5] while the real answer space is the integers 6..13 --
+    # telling a model the number of jurisdictions could be 5.5 is nonsense that
+    # costs elicitation quality. Metaculus's own SDK reads these; we did not.
+    nominal_min: float | None = None
+    nominal_max: float | None = None
     open_lower_bound: bool = True
     open_upper_bound: bool = True
     inbound_outcome_count: int | None = None
@@ -147,6 +153,12 @@ def _question_from(post: dict[str, Any], q: dict[str, Any], post_id: int,
         range_min=_maybe_float(scaling.get("range_min")),
         range_max=_maybe_float(scaling.get("range_max")),
         zero_point=_maybe_float(scaling.get("zero_point")),
+        nominal_min=(_maybe_float(scaling.get("nominal_min"))
+                     if scaling.get("nominal_min") is not None
+                     else _maybe_float(scaling.get("range_min"))),
+        nominal_max=(_maybe_float(scaling.get("nominal_max"))
+                     if scaling.get("nominal_max") is not None
+                     else _maybe_float(scaling.get("range_max"))),
         open_lower_bound=bool(q.get("open_lower_bound", True)),
         open_upper_bound=bool(q.get("open_upper_bound", True)),
         inbound_outcome_count=int(inbound) if inbound is not None else None,

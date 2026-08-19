@@ -34,7 +34,14 @@ def aggregate_binary(probs: Sequence[float]) -> float:
     vals = [p for p in probs if p is not None and 0.0 <= p <= 1.0]
     if not vals:
         raise ValueError("no valid binary probabilities to aggregate")
-    p = statistics.median(vals)
+    # median_low, NOT median. statistics.median AVERAGES the two middle values on
+    # an even-length list, which hands an outlier half the weight -- exactly what
+    # the median was chosen to prevent. [0.90, 0.03] -> median 0.465 vs
+    # median_low 0.03. Ensembles go even whenever a model is dropped.
+    if len(vals) % 2 == 0:
+        log.warning("even ensemble (%d models): using median_low so an outlier "
+                    "cannot take half the weight", len(vals))
+    p = statistics.median_low(vals) if len(vals) % 2 == 0 else statistics.median(vals)
     return clamp_binary(p)
 
 
@@ -59,7 +66,12 @@ def aggregate_multiple_choice(
     merged: dict[str, float] = {}
     for opt in options:
         vals = [float(d.get(opt, 0.0)) for d in usable]
-        merged[opt] = statistics.median(vals) if vals else 0.0
+        if not vals:
+            merged[opt] = 0.0
+        elif len(vals) % 2 == 0:
+            merged[opt] = statistics.median_low(vals)
+        else:
+            merged[opt] = statistics.median(vals)
 
     merged = _normalise(merged)
     for _ in range(24):
