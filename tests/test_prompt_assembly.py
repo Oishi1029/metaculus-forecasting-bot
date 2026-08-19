@@ -133,3 +133,14 @@ def test_no_build_notes_leak_to_the_model():
         text = _Bare()._build_prompt(q_of(qtype), "r")
         assert "BUILD NOTE" not in text
         assert not re.search(r"<[A-Z][^>]{10,90}>", text), "placeholder leaked into the prompt"
+
+
+def test_token_ceiling_leaves_room_for_the_report_and_reasoning():
+    """Measured 2026-08-19: a 4000-token ceiling truncated all three competition
+    models before the JSON block, making 18 of 24 outputs unparseable. Reasoning
+    models spend the same budget on hidden reasoning, so the ceiling must be
+    generous. Raising it costs nothing unless used; truncation costs twice."""
+    from metaculus_bot import config
+    assert config.LLM_MAX_TOKENS >= 12000, (
+        "output ceiling too low: the forecasting prompts request a long "
+        "structured report and the JSON block comes last")

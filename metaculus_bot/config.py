@@ -102,7 +102,13 @@ def models_for_profile() -> list[str]:
 
 
 LLM_TEMPERATURE = _env_float("LLM_TEMPERATURE", 0.3)
-LLM_MAX_TOKENS = _env_int("LLM_MAX_TOKENS", 4000)
+# MEASURED 2026-08-19: at 4000 this truncated ALL THREE competition models
+# mid-sentence, before the required JSON block at the end of the report -- 18 of
+# 24 outputs unparseable, each then paid for twice (wasted generation + salvage
+# call). gemini-3.1-pro produced only 615 characters because reasoning tokens
+# consume the same budget. The prompt asks for a long structured report on a
+# ~37k-character input, so the ceiling has to accommodate that plus reasoning.
+LLM_MAX_TOKENS = _env_int("LLM_MAX_TOKENS", 16000)
 LLM_TIMEOUT_S = _env_float("LLM_TIMEOUT_S", 180.0)
 
 # --- Forecast post-processing ------------------------------------------------
