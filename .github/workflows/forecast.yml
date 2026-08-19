@@ -38,7 +38,10 @@ jobs:
           .venv/bin/pip install -q --upgrade pip
           .venv/bin/pip install -q -r requirements.txt
       - name: Forecast
-        run: .venv/bin/python main.py --tournament "${{ vars.TOURNAMENT_ID || 'minibench' }}"
+        # Comma-separated. Market Pulse is live now; minibench contributes
+        # nothing until its next round opens, then starts contributing with no
+        # change needed here.
+        run: .venv/bin/python main.py --tournament "${{ vars.TOURNAMENT_ID || 'market-pulse-26q3,minibench' }}"
         env:
           METACULUS_TOKEN:    ${{ secrets.METACULUS_TOKEN }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
