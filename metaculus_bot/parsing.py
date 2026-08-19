@@ -204,14 +204,21 @@ def parse_numeric_percentiles(text: str, wanted: list[float]) -> dict[float, flo
     if not isinstance(raw, dict) or not raw:
         raise ParseError("no declared_percentiles object found")
 
-    out: dict[float, float] = {}
+    # Scale is a property of the WHOLE dict, never of one key. Deciding per key
+    # silently destroyed P1: the key "1" in a 0-100 style dict looks like 1.0,
+    # was multiplied to 100.0, then failed the < 100 bound and vanished -- losing
+    # exactly the open-tail anchor the wide percentile set exists to provide.
+    parsed: list[tuple[float, float]] = []
     for k, v in raw.items():
         pk = _as_float(k)
         pv = _as_float(v)
-        if pk is None or pv is None:
-            continue
-        if 0.0 < pk <= 1.0:          # 0.05 style
-            pk *= 100.0
+        if pk is not None and pv is not None:
+            parsed.append((pk, pv))
+    scale = 100.0 if parsed and max(k for k, _ in parsed) <= 1.0 else 1.0
+
+    out: dict[float, float] = {}
+    for pk, pv in parsed:
+        pk *= scale
         if not (0.0 < pk < 100.0):
             continue
         out[round(pk, 4)] = pv

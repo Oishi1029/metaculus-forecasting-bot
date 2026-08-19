@@ -75,7 +75,7 @@ SHAKEOUT_MODELS = [
     ).split(",") if m.strip()
 ]
 # Small, cheap model used ONLY to salvage an unparseable forecast block.
-SALVAGE_MODEL = _env("SALVAGE_MODEL", "openai/gpt-5.6-luna")
+SALVAGE_MODEL = _env("SALVAGE_MODEL", "google/gemini-3.7-flash")
 
 # Perplexity reached THROUGH OpenRouter -- a second, independent search index
 # for the price of the key we already have. NOTE: "perplexity/sonar-reasoning"
@@ -109,7 +109,12 @@ LLM_TEMPERATURE = _env_float("LLM_TEMPERATURE", 0.3)
 # consume the same budget. The prompt asks for a long structured report on a
 # ~37k-character input, so the ceiling has to accommodate that plus reasoning.
 LLM_MAX_TOKENS = _env_int("LLM_MAX_TOKENS", 16000)
-LLM_TIMEOUT_S = _env_float("LLM_TIMEOUT_S", 180.0)
+# 180s was arithmetically incompatible with a 16000-token ceiling: httpx applies
+# this as a TOTAL request timeout, llm.py retries twice, so a slow model burned
+# 3x180s + backoff ~= 546s against a 420s per-question deadline and returned a
+# ZERO -- billed three times over. gemini-3.1-pro is the worst case because
+# reasoning tokens draw on the same budget.
+LLM_TIMEOUT_S = _env_float("LLM_TIMEOUT_S", 300.0)
 
 # --- Forecast post-processing ------------------------------------------------
 # Tail clipping. Evidenced as cheap insurance against the catastrophic-99%
@@ -146,9 +151,9 @@ WEB_PLUGIN_MAX_RESULTS = _env_int("WEB_PLUGIN_MAX_RESULTS", 5 if PROFILE == "sha
 # workflow's timeout-minutes (18), or a question started just before the run
 # deadline can still be running when GitHub kills the job -- potentially between
 # the forecast POST and the comment POST, leaving an uncommented forecast.
-# 10 + 7 = 17 minutes, one minute of headroom. Enforced by a test.
-RUN_DEADLINE_S = _env_float("RUN_DEADLINE_S", 10 * 60)
-PER_QUESTION_DEADLINE_S = _env_float("PER_QUESTION_DEADLINE_S", 420.0)
+# 15 + 9 = 24 minutes against a 30-minute job timeout. Enforced by a test.
+RUN_DEADLINE_S = _env_float("RUN_DEADLINE_S", 15 * 60)
+PER_QUESTION_DEADLINE_S = _env_float("PER_QUESTION_DEADLINE_S", 540.0)
 MAX_CONCURRENT_QUESTIONS = _env_int("MAX_CONCURRENT_QUESTIONS", 6)
 MAX_QUESTIONS_PER_RUN = _env_int("MAX_QUESTIONS_PER_RUN", 0)  # 0 = no cap
 
@@ -156,11 +161,15 @@ MAX_QUESTIONS_PER_RUN = _env_int("MAX_QUESTIONS_PER_RUN", 0)  # 0 = no cap
 HTTP_TIMEOUT_S = _env_float("HTTP_TIMEOUT_S", 60.0)
 PUBLISH_TIMEOUT_S = _env_float("PUBLISH_TIMEOUT_S", 20.0)
 HTTP_MAX_RETRIES = _env_int("HTTP_MAX_RETRIES", 3)
-HTTP_RATE_LIMIT_PER_S = _env_float("HTTP_RATE_LIMIT_PER_S", 2.0)
+HTTP_RATE_LIMIT_PER_S = _env_float("HTTP_RATE_LIMIT_PER_S", 1.0)
 
 # --- Safety ------------------------------------------------------------------
 # Hard stop: the bot must never post twice on one question. This is a tournament
 # rule ("only submit one forecast per question"), not merely good hygiene.
+# Refuse to start a run below this much remaining OpenRouter credit. Dying
+# mid-round zeroes the tail of the question list.
+MIN_CREDIT_FLOOR = _env_float("MIN_CREDIT_FLOOR", 1.50)
+
 PUBLISH = _env_bool("PUBLISH", True)
 # Set ONLY by main.py's --force, which itself refuses to run outside the sandbox
 # and outside dry-run. Never set this in CI.

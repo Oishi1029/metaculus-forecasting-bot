@@ -95,7 +95,7 @@ re-forecasts, because that would break the one-forecast-per-question rule.
 | A comment on every question forecasted | `comment.py`, asserted in `tests/test_rules_compliance.py` |
 | No human in the loop | no interactive call anywhere; a test greps for them |
 | Comments private (auto-published later by Metaculus) | `config.COMMENT_IS_PRIVATE` |
-| Don't blindly copy the community prediction | the CP is never fetched or fed to a model |
+| Don't blindly copy the community prediction | `with_cp=true` IS sent — it is what makes Metaculus return our own `my_forecasts`, which is the entire duplicate-protection mechanism — but the CP is never read: nothing touches `Question.raw`, and the prompt builder passes only named scalar fields |
 
 Iterate only against **`bot-testing-area`**. Tuning a bot after seeing its
 output on open tournament questions is explicitly a rules violation.

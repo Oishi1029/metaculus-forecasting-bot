@@ -72,7 +72,7 @@ def test_forecast_without_comment_is_repaired_not_reforecast():
     missing comment -- re-forecasting would break rule 1."""
     src = inspect.getsource(run)
     # The repair path posts a comment and nothing else.
-    assert "repair_comment()" in src
+    assert "repair_comment(" in src
     start = src.index("elif w.needs_comment and not w.to_forecast:")
     branch = src[start: src.index("await client.post_comment(w.post_id, text)", start)]
     assert "post_forecast" not in branch
@@ -159,9 +159,31 @@ def test_force_refuses_outside_the_sandbox():
                       "--force", "--dry-run"]) == 2
 
 
-def test_force_is_never_set_in_ci():
+def test_force_is_unreachable_from_the_scheduled_path():
+    """--force is now exposed as a MANUAL dispatch input so the sandbox smoke test
+    is runnable. It must remain impossible for the scheduled cron to set it: the
+    input defaults to "false" and a scheduled event supplies no inputs at all.
+    main.py additionally refuses --force outside sandbox+dry-run (tested above)."""
     wf = (REPO / ".github" / "workflows" / "forecast.yml").read_text()
-    assert "--force" not in wf and "FORCE_REFORECAST" not in wf
+    assert "FORCE_REFORECAST" not in wf, "the env var must never be set in CI"
+    # every --force occurrence must be guarded by the manual-dispatch input
+    for line in wf.splitlines():
+        if "--force" in line:
+            assert "github.event.inputs.force" in line, (
+                f"--force reachable without the manual dispatch input: {line.strip()}")
+    # and that input must default to false
+    import re
+    block = wf[wf.index("force:"):]
+    assert re.search(r'default:\s*"false"', block[:200]), "force input must default to false"
+
+
+def test_scheduled_runs_never_pass_dry_run_either():
+    """A scheduled tick must actually publish; a stray --dry-run would make every
+    run look healthy while forecasting nothing."""
+    wf = (REPO / ".github" / "workflows" / "forecast.yml").read_text()
+    for line in wf.splitlines():
+        if "--dry-run" in line:
+            assert "github.event.inputs.dry_run" in line
 
 
 def test_env_mutations_happen_before_ANY_package_import():
@@ -207,3 +229,23 @@ def test_research_does_not_use_a_flagship_model():
     """Measured 2026-08-19: routing web search through the flagship timed out on
     8 of 8 questions, silently halving research sources."""
     assert config.RESEARCH_MODEL not in config.COMPETITION_MODELS
+
+
+def test_repair_comment_displays_the_forecast():
+    """The rule is 'a comment response (INCLUDING A DISPLAY OF ITS FORECAST)'.
+    The repair path used to post prose with no number in it -- the one genuine
+    eligibility defect in the codebase."""
+    post = {"id": 55, "question": {"id": 66, "type": BINARY, "status": "open",
+                                   "title": "T",
+                                   "my_forecasts": {"latest": {"forecast_values": [0.3, 0.7]},
+                                                    "history": [{}]}}}
+    q = parse_post(post)
+    text = comment_mod.repair_comment([q])
+    assert "70.0% yes" in text, "repair comment must display the submitted forecast"
+    assert "No human" in text
+
+
+def test_repair_comment_without_values_still_returns_text():
+    q = Question(id_of_post=1, id_of_question=2, type=BINARY, title="T", url="u")
+    assert comment_mod.repair_comment([q]).strip()
+    assert comment_mod.repair_comment([]).strip()

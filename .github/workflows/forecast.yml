@@ -2,6 +2,27 @@ name: Forecast on tournament questions
 
 on:
   workflow_dispatch:
+    inputs:
+      tournament:
+        description: "Tournament slug(s), comma-separated"
+        required: false
+        default: ""
+      profile:
+        description: "competition or shakeout"
+        required: false
+        default: ""
+      dry_run:
+        description: "true = publish nothing"
+        required: false
+        default: "false"
+      force:
+        description: "true = re-forecast (sandbox + dry-run only)"
+        required: false
+        default: "false"
+      limit:
+        description: "max posts this run (0 = no cap)"
+        required: false
+        default: "0" 
   repository_dispatch:
     types: [forecast-now]        # escape hatch: any external scheduler can fire a run
   schedule:
@@ -21,7 +42,7 @@ jobs:
     runs-on: ubuntu-latest
     # MUST stay under the 20-minute tick. Without this a hung LLM call holds the
     # concurrency group for up to 6 hours and starves ~18 consecutive ticks.
-    timeout-minutes: 18
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -41,11 +62,17 @@ jobs:
         # Comma-separated. Market Pulse is live now; minibench contributes
         # nothing until its next round opens, then starts contributing with no
         # change needed here.
-        run: .venv/bin/python main.py --tournament "${{ vars.TOURNAMENT_ID || 'market-pulse-26q3,minibench' }}"
+        run: |
+          ARGS="--tournament ${{ github.event.inputs.tournament || vars.TOURNAMENT_ID || 'market-pulse-26q3,minibench' }}"
+          [ "${{ github.event.inputs.dry_run }}" = "true" ] && ARGS="$ARGS --dry-run"
+          [ "${{ github.event.inputs.force }}" = "true" ] && ARGS="$ARGS --force"
+          [ -n "${{ github.event.inputs.limit }}" ] && [ "${{ github.event.inputs.limit }}" != "0" ] && ARGS="$ARGS --limit ${{ github.event.inputs.limit }}"
+          echo "running: main.py $ARGS"
+          .venv/bin/python main.py $ARGS
         env:
           METACULUS_TOKEN:    ${{ secrets.METACULUS_TOKEN }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           ASKNEWS_CLIENT_ID:  ${{ secrets.ASKNEWS_CLIENT_ID }}
           ASKNEWS_SECRET:     ${{ secrets.ASKNEWS_SECRET }}
           EXA_API_KEY:        ${{ secrets.EXA_API_KEY }}
-          PROFILE:            ${{ vars.PROFILE || 'competition' }}
+          PROFILE:            ${{ github.event.inputs.profile || vars.PROFILE || 'competition' }}

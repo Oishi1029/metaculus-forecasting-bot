@@ -21,14 +21,48 @@ from . import config
 from .models import BINARY, DISCRETE, MULTIPLE_CHOICE, NUMERIC, Forecast
 
 
-def repair_comment() -> str:
-    """Used when a previous run published a forecast but died before commenting."""
-    return (
-        "**Forecast previously submitted via the API.**\n\n"
+def repair_comment(questions: list | None = None) -> str:
+    """Comment for a forecast published by an earlier run that died before commenting.
+
+    IT MUST DISPLAY THE FORECAST. The rule is "a comment response (INCLUDING A
+    DISPLAY OF ITS FORECAST) under each question that it is forecasting" -- prose
+    alone does not satisfy it, so this reads the already-submitted values back off
+    the question (Metaculus returns them in my_forecasts) and renders them.
+    """
+    lines = ["**Forecast previously submitted via the API.**", ""]
+    rows = []
+    for q in questions or []:
+        vals = _submitted_values(q)
+        if not vals:
+            continue
+        label = q.group_label or q.title or f"question {q.id_of_question}"
+        rows.append(f"| {label} | {vals} |")
+    if rows:
+        lines += ["| Question | Submitted forecast |", "|---|---|", *rows, ""]
+    lines.append(
         "This comment is the required reasoning record for that forecast; the preceding "
         "run submitted the forecast but did not complete its comment. "
         "No human reviewed or altered the forecast."
     )
+    return "\n".join(lines)
+
+
+def _submitted_values(q) -> str:
+    """Render the forecast Metaculus already holds for this question, for display."""
+    mine = (q.raw or {}) if isinstance(getattr(q, "raw", None), dict) else {}
+    fv = None
+    for src in (q.raw.get("question") if isinstance(q.raw, dict) else None,):
+        if isinstance(src, dict) and src.get("id") == q.id_of_question:
+            fv = ((src.get("my_forecasts") or {}).get("latest") or {}).get("forecast_values")
+    if fv is None:
+        fv = getattr(q, "submitted_values", None)
+    if not fv:
+        return ""
+    if q.type == BINARY and len(fv) == 2:
+        return f"{float(fv[1]) * 100:.1f}% yes"
+    if q.type == MULTIPLE_CHOICE and q.options and len(fv) == len(q.options):
+        return ", ".join(f"{o} {float(p) * 100:.1f}%" for o, p in zip(q.options, fv))
+    return f"continuous distribution, {len(fv)} points"
 
 
 def render_post_comment(forecasts: list[Forecast]) -> str:

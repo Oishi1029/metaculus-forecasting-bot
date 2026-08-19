@@ -25,7 +25,8 @@ async def test_missing_model_is_reported(monkeypatch):
 
 
 async def test_all_present_reports_nothing_missing(monkeypatch):
-    every = set(config.models_for_profile()) | {config.SALVAGE_MODEL, config.PERPLEXITY_MODEL}
+    every = (set(config.models_for_profile())
+             | {config.SALVAGE_MODEL, config.PERPLEXITY_MODEL, config.RESEARCH_MODEL})
     _patch_catalogue(monkeypatch, every)
     out = await preflight.check_models()
     assert out["missing"] == []

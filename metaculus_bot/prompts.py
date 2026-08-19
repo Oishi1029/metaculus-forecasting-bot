@@ -371,17 +371,6 @@ Notes:
 - A partial set cannot be salvaged. All 13 or the response is discarded.
 - Values must be STRICTLY increasing (p20 > p10, never equal), in the base unit, no scientific notation.
 The LAST thing you write MUST be this fenced ```json block. Write nothing after it.
-
---- BOUND MESSAGES (build these from the question metadata) ---
-
-OPEN UPPER:
-The upper bound is open: {upper} is the top of the displayed range, not a hard limit, so the outcome can resolve above {upper}. Your percentiles are the ONLY way you express probability mass, including mass beyond the displayed range. To put N% of your probability above the open ceiling, place that fraction of your percentiles above it: if you believe there is a ~75% chance the outcome exceeds {upper}, then your P50 (median) must be ABOVE {upper} and only your lower percentiles (P1, P2.5, P5, P10, P20) sit inside or below the range. Put percentiles at or above {upper} where you actually believe the value lies, even far outside the displayed range. Do not pile percentiles at the boundary.
-
-OPEN LOWER:
-The lower bound is open: {lower} is the bottom of the displayed range, not a hard limit, so the outcome can resolve below {lower}. Your percentiles are the ONLY way you express probability mass, including mass beyond the displayed range. To put N% of your probability below the open floor, place that fraction of your percentiles below it: if you believe there is a ~75% chance the outcome is below {lower}, then your P50 (median) must be BELOW {lower} and only your upper percentiles (P80, P90, P95, P97.5, P99) sit inside or above the range. Put percentiles at or below {lower} where you actually believe the value lies, even far outside the displayed range. Do not pile percentiles at the boundary.
-
-CLOSED UPPER: The upper bound is closed: the outcome can not be higher than {upper}.
-CLOSED LOWER: The lower bound is closed: the outcome can not be lower than {lower}.
 """
 
 # --- 5. GAP-FILL ANALYZER PROMPT  (optional second research pass) ------

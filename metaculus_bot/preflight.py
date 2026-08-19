@@ -75,3 +75,26 @@ def usable_ensemble(models: list[str], missing: list[str]) -> list[str]:
         log.warning("forecasting with %d of %d configured models: %s",
                     len(live), len(models), ", ".join(live))
     return live
+
+
+async def openrouter_credit(timeout: float = 15.0) -> float | None:
+    """Remaining credit on the key, or None if it cannot be determined.
+
+    Running out of credit mid-round is the worst failure shape available: the
+    tail of the question list silently becomes zeros, and because prize share is
+    proportional to the SQUARE of the summed score, losing the last stretch costs
+    far more than proportionally. Cheap to check, so check.
+    """
+    if not config.OPENROUTER_API_KEY:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as c:
+            r = await c.get("https://openrouter.ai/api/v1/key",
+                            headers={"Authorization": f"Bearer {config.OPENROUTER_API_KEY}"})
+            r.raise_for_status()
+            d = (r.json() or {}).get("data") or {}
+            rem = d.get("limit_remaining")
+            return float(rem) if rem is not None else None
+    except Exception as exc:                              # noqa: BLE001
+        log.warning("could not read OpenRouter credit (%s); continuing", exc)
+        return None

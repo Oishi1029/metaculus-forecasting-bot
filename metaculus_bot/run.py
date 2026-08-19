@@ -86,6 +86,19 @@ async def run_tournament(tournament: str | int, *, dry_run: bool = False,
     # Validate model ids against OpenRouter's catalogue before spending anything.
     # A retired id fails every call while the run still reports success, which is
     # silent score loss -- see preflight.py for the case that motivated this.
+    credit = await preflight.openrouter_credit()
+    if credit is not None:
+        log.info("OpenRouter credit remaining: $%.2f", credit)
+        if credit < config.MIN_CREDIT_FLOOR:
+            log.error("credit $%.2f is below the $%.2f floor -- refusing to start. "
+                      "A run that dies mid-round leaves the tail of the question "
+                      "list unforecast, and the score is a SQUARED sum.",
+                      credit, config.MIN_CREDIT_FLOOR)
+            await llm.aclose()
+            summary.errors.append("insufficient OpenRouter credit")
+            summary.failed = 1
+            return summary
+
     checked = await preflight.check_models()
     models = preflight.usable_ensemble(config.models_for_profile(), checked["missing"])
     log.info("ensemble: %s", ", ".join(models))
@@ -105,12 +118,19 @@ async def run_tournament(tournament: str | int, *, dry_run: bool = False,
         log.info("tournament %s: %d open post(s), %d forecastable question(s)",
                  tournament, len(posts), summary.questions)
 
+        # If the ledger cannot be read we must NOT assume "uncommented": that would
+        # post a repair comment on every already-forecast post, every 20 minutes,
+        # and comments accumulate. Skipping repairs for one tick is harmless --
+        # the next tick repairs them. Catch broadly: an exception escaping here
+        # would kill the tournament before a single forecast.
+        ledger_ok = True
         try:
             commented = await client.commented_post_ids()
-        except MetaculusError as exc:
-            log.warning("could not read comment ledger (%s); "
-                        "treating all posts as uncommented", exc)
+        except Exception as exc:                          # noqa: BLE001
+            log.error("could not read comment ledger (%s); skipping comment repairs "
+                      "this run to avoid duplicate comments", exc)
             commented = set()
+            ledger_ok = False
 
         work: list[_PostWork] = []
         for post_id, qs in by_post.items():
@@ -118,11 +138,11 @@ async def run_tournament(tournament: str | int, *, dry_run: bool = False,
                        if config.FORCE_REFORECAST or not q.already_forecasted]
             done = [q for q in qs if q.already_forecasted]
             has_comment = post_id in commented
-            if not pending and (has_comment or not done):
+            if not pending and (has_comment or not done or not ledger_ok):
                 summary.skipped += len(qs)
                 continue
             work.append(_PostWork(post_id=post_id, to_forecast=pending,
-                                  needs_comment=not has_comment))
+                                  needs_comment=ledger_ok and not has_comment))
             summary.skipped += len(qs) - len(pending)
 
         if limit or config.MAX_QUESTIONS_PER_RUN:
@@ -198,7 +218,7 @@ async def run_tournament(tournament: str | int, *, dry_run: bool = False,
             if published:
                 text = comment_mod.render_post_comment([fc for _, fc in published])
             elif w.needs_comment and not w.to_forecast:
-                text = comment_mod.repair_comment()
+                text = comment_mod.repair_comment(by_post.get(w.post_id, []))
             else:
                 return out
             try:

@@ -144,3 +144,27 @@ def test_token_ceiling_leaves_room_for_the_report_and_reasoning():
     assert config.LLM_MAX_TOKENS >= 12000, (
         "output ceiling too low: the forecasting prompts request a long "
         "structured report and the JSON block comes last")
+
+
+def test_numeric_prompt_ships_exactly_ONE_bound_instruction_per_axis():
+    """The numeric template used to end with an authoring-notes appendix listing
+    OPEN UPPER / OPEN LOWER / CLOSED UPPER / CLOSED LOWER, all four with the real
+    bounds substituted in. The model therefore read four authoritative,
+    mutually contradictory instructions as the last thing in the prompt --
+    on a fully closed question, both 'your P50 must be BELOW x' and 'the outcome
+    can not be lower than x'. It corrupted exactly the open/closed-bound axis
+    that the CDF tail logic exists to get right."""
+    text = _Bare()._build_prompt(q_of(NUMERIC), "r")
+    assert "BOUND MESSAGES" not in text
+    # q_of(NUMERIC) is closed-lower, open-upper
+    assert text.count("The lower bound is closed") == 1
+    assert text.count("The lower bound is open") == 0
+    assert text.count("The upper bound is open") == 1
+    assert text.count("The upper bound is closed") == 0
+
+
+def test_numeric_prompt_ends_with_the_json_contract():
+    """Nothing may follow the 'write nothing after it' instruction."""
+    text = _Bare()._build_prompt(q_of(NUMERIC), "r")
+    tail = text.rstrip()[-400:]
+    assert "json" in tail.lower()

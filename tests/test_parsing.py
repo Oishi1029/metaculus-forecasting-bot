@@ -100,3 +100,20 @@ def test_percentile_aggregation_repairs_non_monotonicity():
     keys = sorted(merged)
     vals = [merged[k] for k in keys]
     assert all(b > a for a, b in zip(vals, vals[1:])), "percentiles must be strictly increasing"
+
+
+def test_P1_survives_a_0_to_100_percentile_dict():
+    """Scale must be decided for the whole dict. Deciding per key destroyed P1:
+    the key "1" looks like 0-1 style, was scaled to 100.0, then dropped for not
+    being < 100 -- losing the open-tail anchor on most continuous questions."""
+    out = parse_numeric_percentiles(
+        '```json\n{"declared_percentiles":{"1":5,"10":8,"50":20,"90":40,"99":95}}\n```', [])
+    assert 1.0 in out, "P1 was silently dropped"
+    assert out[1.0] == 5.0
+    assert out[99.0] == 95.0
+
+
+def test_P1_survives_a_0_to_1_percentile_dict():
+    out = parse_numeric_percentiles(
+        '```json\n{"declared_percentiles":{"0.01":5,"0.1":8,"0.5":20,"0.99":95}}\n```', [])
+    assert out[1.0] == 5.0 and out[99.0] == 95.0
