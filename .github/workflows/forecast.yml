@@ -63,7 +63,14 @@ jobs:
         # nothing until its next round opens, then starts contributing with no
         # change needed here.
         run: |
-          ARGS="--tournament ${{ github.event.inputs.tournament || vars.TOURNAMENT_ID || 'market-pulse-26q3,minibench' }}"
+          # Market Pulse REMOVED 2026-08-30 on Bong's instruction: hard stop on that
+          # event for lack of inference budget (OpenRouter spendable credit was
+          # measured at $21.36). The repo variable TOURNAMENT_ID is what actually
+          # binds; this literal is only the fallback if that variable is deleted,
+          # and it is kept in sync so deleting the variable cannot silently
+          # re-enable a tournament we deliberately stopped.
+          # To resume: gh variable set TOURNAMENT_ID --body 'market-pulse-27q1,minibench'
+          ARGS="--tournament ${{ github.event.inputs.tournament || vars.TOURNAMENT_ID || 'minibench' }}"
           [ "${{ github.event.inputs.dry_run }}" = "true" ] && ARGS="$ARGS --dry-run"
           [ "${{ github.event.inputs.force }}" = "true" ] && ARGS="$ARGS --force"
           [ -n "${{ github.event.inputs.limit }}" ] && [ "${{ github.event.inputs.limit }}" != "0" ] && ARGS="$ARGS --limit ${{ github.event.inputs.limit }}"
