@@ -54,6 +54,11 @@ OPEN_BOUND_MIN_TAIL = 0.001     # cdf[0]  >= 0.001 when open_lower_bound
 OPEN_BOUND_MAX_HEAD = 0.999     # cdf[-1] <= 0.999 when open_upper_bound
 _ALPHA_SAFETY_MARGIN = 1.1      # metaculus-bot numeric/pchip_cdf.py:342-350
 
+# --- spot-scoring defences. See section 5b for the derivation and the evidence. -
+UNIFORM_REF_TAIL = 0.05         # mass per OPEN tail in Metaculus's uniform reference
+OUT_OF_RANGE_TAIL_CAP = 0.05    # we ship no more per open tail than the reference does
+MIN_BIN_FRACTION_OF_UNIFORM = 0.25   # every bin >= 25% of the reference bin mass
+
 
 # =============================================================================
 # 1. cdf length + per-bin step constraints
@@ -290,6 +295,92 @@ def _tail_anchor(x_far: float, x_near: float,
 
 
 # =============================================================================
+# 5b. spot-scoring defences
+# =============================================================================
+# WHY THESE TWO EXIST. Market Pulse is scored with SPOT PEER scoring, whose
+# per-question baseline term was derived and verified exactly against StarDream's
+# five scored 26Q3 forecasts on 2026-08-30 (see the campaign folder's
+# tools/spot_score.py, which reproduces all five to 0.0000):
+#
+#     spot_baseline = 50 * ln( bin_mass / u_ref ),  u_ref = (1 - 0.05*n_open) / N
+#
+# Two properties of that formula drive everything below.
+#
+#   1. It is a LOG score, so mass placed where the outcome is NOT costs nothing
+#      directly -- but it is mass stolen from where the outcome IS. On the five
+#      scored questions this bot shipped 16.7%, 13.3% and 5.4% of its probability
+#      BELOW a range_min that Metaculus itself had chosen, and in all five the
+#      outcome landed INSIDE the range.
+#
+#      CRUCIALLY, only the FABRICATED part of that is removed. _tail_anchor runs
+#      solely when no declared percentile reached the bound, so the mass it
+#      produces is an artifact of fitting a decay rate to the last two declared
+#      points -- not something the model asserted. That artifact is capped at the
+#      reference tail, in section 6c, at the anchor. A tail the model actually
+#      elicited (percentiles placed beyond the bound) never enters that branch
+#      and is passed through untouched, because it is a belief and discarding it
+#      would throw away the forecast -- see
+#      test_open_upper_preserves_elicited_tail_mass.
+#
+#   2. The loss is UNBOUNDED below. Under the bare validator floor a single bin
+#      may hold max(5e-5, 0.01/N), which is a single-question baseline of about
+#      -225 at every N. For scale, the LAST PAYING position on the live 26Q3
+#      leaderboard scored +231.56 in total, so one badly-missed question can
+#      erase an entire edition. Tournament prize share is max(total, 0)**2, which
+#      pays nothing at all for a negative sum, so bounding the downside is worth
+#      more than sharpening the upside. _apply_probability_floor bounds it.
+#
+# A floor fraction f caps a single question's baseline at 50*ln(f):
+#     f = 0.20 -> -80.5     f = 0.25 -> -69.3     f = 0.30 -> -60.2
+# 0.25 is chosen because -69 is comfortably inside the +231 a paying position
+# needs, so no single question can erase an edition, while still leaving 75% of
+# the forecast's own shape intact.
+#
+# NOT DONE, and deliberately: blanket WIDENING of the distribution. It was tested
+# against the same five outcomes and it makes the score WORSE (-79.19 actual ->
+# -64.85 at 1.25x, then -86.65 at 2x, -210 at 4x). The centres were wrong, not
+# merely narrow, and widening a wrong centre moves mass away from the outcome.
+# Fixing the centres is a research-stage problem, not a CDF-stage one.
+
+
+def uniform_reference_mass(cdf_size: int, open_lower: bool, open_upper: bool) -> float:
+    """``u_ref`` -- the per-bin mass of Metaculus's uniform reference forecast."""
+    inbound = max(1, cdf_size - 1)
+    n_open = int(bool(open_lower)) + int(bool(open_upper))
+    return (1.0 - UNIFORM_REF_TAIL * n_open) / inbound
+
+
+def _apply_probability_floor(cdf: np.ndarray, floor: float) -> np.ndarray:
+    """Mix toward uniform-over-inbound until every bin holds at least ``floor``.
+
+    Mixing rather than clipping keeps the array monotone and keeps the endpoints
+    -- and therefore the out-of-range mass -- exactly where they were. Mixing
+    toward uniform can only REDUCE the largest bin, so it cannot introduce a
+    max-step violation.
+
+    The floor is ABSOLUTE, not a share of the in-range mass, because the loss it
+    bounds -- 50*ln(mass/u_ref) -- is measured against an absolute u_ref. One
+    consequence, accepted deliberately: a forecast carrying a large ELICITED tail
+    has less in-range mass to spread, so it is mixed harder to clear the same
+    floor. That is the price of the guarantee and it is bounded at lam = 1.
+    """
+    n = cdf.size
+    if n < 2 or floor <= 0.0:
+        return cdf
+    lo, hi = float(cdf[0]), float(cdf[-1])
+    inbound = hi - lo
+    if inbound <= 1e-12:
+        return cdf
+    per_bin = inbound / (n - 1)
+    if per_bin <= floor:                 # even uniform cannot reach the floor
+        return np.linspace(lo, hi, n)
+    if float(np.diff(cdf).min()) >= floor:
+        return cdf
+    lam = min(1.0, floor / per_bin)
+    return (1.0 - lam) * cdf + lam * np.linspace(lo, hi, n)
+
+
+# =============================================================================
 # 6. the public entry point
 # =============================================================================
 def build_continuous_cdf(percentile_dict: dict[float, float],
@@ -395,12 +486,19 @@ def build_continuous_cdf(percentile_dict: dict[float, float],
         anchor = _tail_anchor(x_nodes[-2], x_nodes[-1], ps[-2], ps[-1],
                               1.0, upper=True)
         if anchor is not None:
+            # Cap a FABRICATED tail at the uniform reference (section 5b). This
+            # branch only runs when NO declared percentile reached the bound, so
+            # the mass here is an artifact of the decay-rate fit, not a belief.
+            # An elicited tail -- the model actually placing percentiles beyond
+            # the bound -- never enters this branch and is left untouched.
+            anchor = max(anchor, 1.0 - OUT_OF_RANGE_TAIL_CAP)
             anchor = min(OPEN_BOUND_MAX_HEAD, max(anchor, ps[-1] + 1e-9))
             x_nodes, ps = np.append(x_nodes, 1.0), np.append(ps, anchor)
     if open_lower and x_nodes[0] > 1e-12 and ps[0] > OPEN_BOUND_MIN_TAIL:
         anchor = _tail_anchor(x_nodes[1], x_nodes[0], ps[1], ps[0],
                               0.0, upper=False)
         if anchor is not None:
+            anchor = min(anchor, OUT_OF_RANGE_TAIL_CAP)     # fabricated tail; see above
             anchor = max(OPEN_BOUND_MIN_TAIL, min(anchor, ps[0] - 1e-9))
             x_nodes, ps = np.insert(x_nodes, 0, 0.0), np.insert(ps, 0, anchor)
 
@@ -431,6 +529,16 @@ def build_continuous_cdf(percentile_dict: dict[float, float],
             f"Infeasible: {n - 1} bins x min_step {min_step} exceeds the legal "
             f"cdf range [{lower_cap}, {upper_cap}]"
         )
+    # --- 6e-bis. spot-scoring defence: the probability floor (see section 5b) --
+    # Applied BEFORE the step repair in 6f so that 6f/6g re-validate the result.
+    # The out-of-range defence is NOT here -- it is applied at the anchor in 6c,
+    # so that it can distinguish a fabricated tail from an elicited one.
+    cdf = _apply_probability_floor(
+        cdf,
+        MIN_BIN_FRACTION_OF_UNIFORM * uniform_reference_mass(n, open_lower, open_upper),
+    )
+    cdf = np.maximum.accumulate(np.clip(cdf, 0.0, 1.0))
+
     inbound_mass = float(cdf[-1] - cdf[0])
 
     # --- 6f. min/max step repair -------------------------------------------

@@ -178,7 +178,30 @@ class Forecaster:
             if not sets:
                 raise ForecastFailure("no parseable percentiles from any model")
             merged = aggregate.aggregate_percentiles(sets)
-            cdf = build_continuous_cdf(merged, q.cdf_metadata())
+            meta = q.cdf_metadata()
+            cdf = build_continuous_cdf(merged, meta)
+            # Telemetry for the out-of-range question that cdf.py section 5b
+            # leaves open: is the tail mass ELICITED (the model placed real
+            # percentiles beyond the bound) or FABRICATED (_tail_anchor's decay
+            # fit invented it)? The cap only touches the fabricated kind, and we
+            # cannot tell them apart after the fact from the submitted CDF alone.
+            # Logging it per question is what turns the next edition's forecasts
+            # into evidence instead of guesswork. Costs nothing and calls no model.
+            try:
+                vals = [float(v) for v in merged.values()]
+                lo_b, hi_b = float(meta["range_min"]), float(meta["range_max"])
+                log.info(
+                    "post %s q%s: tail_below=%.4f tail_above=%.4f "
+                    "elicited_below=%d elicited_above=%d min_bin=%.3e",
+                    q.id_of_post, q.id_of_question, cdf[0], 1.0 - cdf[-1],
+                    sum(1 for v in vals if v < lo_b), sum(1 for v in vals if v > hi_b),
+                    min(b - a for a, b in zip(cdf, cdf[1:])) if len(cdf) > 1 else float("nan"),
+                )
+            except Exception:                              # noqa: BLE001
+                # Loud, not silent: a swallowed AttributeError here would mean the
+                # telemetry never ran and we would think the tails were fine.
+                log.warning("tail telemetry failed for q%s", q.id_of_question,
+                            exc_info=True)
             # `or` treats a legitimate median of 0 (or 0.0%) as missing.
             median = (merged[50.0] if 50.0 in merged
                       else merged[sorted(merged)[len(merged) // 2]])
