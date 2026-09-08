@@ -86,7 +86,9 @@ async def run_tournament(tournament: str | int, *, dry_run: bool = False,
     # Validate model ids against OpenRouter's catalogue before spending anything.
     # A retired id fails every call while the run still reports success, which is
     # silent score loss -- see preflight.py for the case that motivated this.
-    credit = await preflight.openrouter_credit()
+    credit = None if config.all_models_are_free() else await preflight.openrouter_credit()
+    if config.all_models_are_free():
+        log.info("all configured models are free -- skipping the credit floor")
     if credit is not None:
         log.info("OpenRouter credit remaining: $%.2f", credit)
         if credit < config.MIN_CREDIT_FLOOR:

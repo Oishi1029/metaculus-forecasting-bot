@@ -37,8 +37,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                    help="tournament slug(s) or id(s), comma-separated. One cron can then "
                         "cover a live tournament and one that has not opened yet: a slug "
                         "with no open questions simply contributes nothing.")
-    p.add_argument("--profile", choices=["competition", "shakeout"], default=None,
-                   help="model/cost profile; overrides env PROFILE")
+    p.add_argument("--profile", choices=["competition", "shakeout", "free"], default=None,
+                   help="model/cost profile; overrides env PROFILE. 'free' runs entirely on "
+                        "OpenRouter ':free' models with AskNews-only research, costing $0.")
     p.add_argument("--dry-run", action="store_true",
                    help="run the full pipeline but publish nothing (local use only)")
     p.add_argument("--limit", type=int, default=0, help="cap questions this run (0 = no cap)")

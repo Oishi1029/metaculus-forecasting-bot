@@ -67,6 +67,20 @@ COMPETITION_MODELS = [
         "openai/gpt-5.6-sol,anthropic/claude-opus-5,google/gemini-3.1-pro-preview",
     ).split(",") if m.strip()
 ]
+# ZERO-COST profile. Verified 2026-09-08 on a real 37k-character forecasting
+# prompt: both models finished cleanly (finish_reason=stop, ~7,670 output tokens)
+# and parsed first time. Three other free models were rejected -- inkling is
+# "agentic harnesses only" (403), gemma-4-31b rate-limited (429), and
+# dots-3-note burned all 16,000 tokens on hidden reasoning and returned ZERO
+# characters. Both survivors are NVIDIA, so vendor diversity is lost; that is
+# the price of $0.
+FREE_MODELS = [
+    m.strip() for m in _env(
+        "FREE_MODELS",
+        "nvidia/nemotron-3-ultra-550b-a55b:free,nvidia/nemotron-3-super-120b-a12b:free",
+    ).split(",") if m.strip()
+]
+
 # Cheap profile for shaking the pipeline out against the sandbox.
 SHAKEOUT_MODELS = [
     m.strip() for m in _env(
@@ -75,7 +89,9 @@ SHAKEOUT_MODELS = [
     ).split(",") if m.strip()
 ]
 # Small, cheap model used ONLY to salvage an unparseable forecast block.
-SALVAGE_MODEL = _env("SALVAGE_MODEL", "google/gemini-3.7-flash")
+SALVAGE_MODEL = _env("SALVAGE_MODEL", "nvidia/nemotron-3-super-120b-a12b:free"
+                     if _env("PROFILE", "competition").lower() == "free"
+                     else "google/gemini-3.7-flash")
 
 # Perplexity reached THROUGH OpenRouter -- a second, independent search index
 # for the price of the key we already have. NOTE: "perplexity/sonar-reasoning"
@@ -98,7 +114,24 @@ PROFILE = _env("PROFILE", "competition").lower()   # "competition" | "shakeout"
 
 
 def models_for_profile() -> list[str]:
-    return SHAKEOUT_MODELS if PROFILE == "shakeout" else COMPETITION_MODELS
+    if PROFILE == "free":
+        return FREE_MODELS
+    if PROFILE == "shakeout":
+        return SHAKEOUT_MODELS
+    return COMPETITION_MODELS
+
+
+def all_models_are_free() -> bool:
+    """True when every configured model is an OpenRouter ':free' variant.
+
+    Gates the credit floor: with no paid model in the run there is nothing to
+    run out of, and a floor that blocks a $0 run would keep the bot switched off
+    for no reason -- which is exactly what happened at $1.28 remaining.
+    """
+    models = models_for_profile() + [SALVAGE_MODEL]
+    if RESEARCH_USES_PAID_PROVIDERS:
+        return False
+    return bool(models) and all(m.endswith(":free") for m in models)
 
 
 LLM_TEMPERATURE = _env_float("LLM_TEMPERATURE", 0.3)
@@ -114,7 +147,10 @@ LLM_MAX_TOKENS = _env_int("LLM_MAX_TOKENS", 16000)
 # 3x180s + backoff ~= 546s against a 420s per-question deadline and returned a
 # ZERO -- billed three times over. gemini-3.1-pro is the worst case because
 # reasoning tokens draw on the same budget.
-LLM_TIMEOUT_S = _env_float("LLM_TIMEOUT_S", 300.0)
+# 420s, not 300s. MEASURED 2026-09-08: nemotron-3-ultra took 339.9s on a real
+# forecasting prompt and nemotron-3-super 191.0s. At 300s the slower model would
+# time out on EVERY question, silently halving a two-model ensemble.
+LLM_TIMEOUT_S = _env_float("LLM_TIMEOUT_S", 420.0)
 
 # --- Forecast post-processing ------------------------------------------------
 # Tail clipping. Evidenced as cheap insurance against the catastrophic-99%
@@ -143,7 +179,14 @@ RESEARCH_MAX_CHARS = _env_int("RESEARCH_MAX_CHARS", 24000)
 ASKNEWS_USE_ARCHIVE = _env_bool("ASKNEWS_USE_ARCHIVE", False)
 ASKNEWS_ARTICLES = _env_int("ASKNEWS_ARTICLES", 6)
 # OpenRouter's native web plugin, used as a research source that needs no extra key.
-WEB_PLUGIN_ENABLED = _env_bool("WEB_PLUGIN_ENABLED", True)
+# OpenRouter's web plugin bills per result, and Perplexity's Sonar models bill
+# per token, REGARDLESS of the forecasting model being free. On a zero budget
+# both must be off, leaving AskNews -- whose tournament tier is genuinely free --
+# as the only research source. This is a real quality loss: source diversity was
+# the strongest evidenced predictor of score. It is the cost of $0.
+WEB_PLUGIN_ENABLED = _env_bool("WEB_PLUGIN_ENABLED", _env("PROFILE", "competition").lower() != "free")
+PERPLEXITY_ENABLED = _env_bool("PERPLEXITY_ENABLED", _env("PROFILE", "competition").lower() != "free")
+RESEARCH_USES_PAID_PROVIDERS = WEB_PLUGIN_ENABLED or PERPLEXITY_ENABLED
 WEB_PLUGIN_MAX_RESULTS = _env_int("WEB_PLUGIN_MAX_RESULTS", 5 if PROFILE == "shakeout" else 10)
 
 # --- Run shape ---------------------------------------------------------------
@@ -151,9 +194,9 @@ WEB_PLUGIN_MAX_RESULTS = _env_int("WEB_PLUGIN_MAX_RESULTS", 5 if PROFILE == "sha
 # workflow's timeout-minutes (18), or a question started just before the run
 # deadline can still be running when GitHub kills the job -- potentially between
 # the forecast POST and the comment POST, leaving an uncommented forecast.
-# 15 + 9 = 24 minutes against a 30-minute job timeout. Enforced by a test.
+# 15 + 11 = 26 minutes against a 30-minute job timeout. Enforced by a test.
 RUN_DEADLINE_S = _env_float("RUN_DEADLINE_S", 15 * 60)
-PER_QUESTION_DEADLINE_S = _env_float("PER_QUESTION_DEADLINE_S", 540.0)
+PER_QUESTION_DEADLINE_S = _env_float("PER_QUESTION_DEADLINE_S", 660.0)
 MAX_CONCURRENT_QUESTIONS = _env_int("MAX_CONCURRENT_QUESTIONS", 6)
 MAX_QUESTIONS_PER_RUN = _env_int("MAX_QUESTIONS_PER_RUN", 0)  # 0 = no cap
 

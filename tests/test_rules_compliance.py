@@ -249,3 +249,27 @@ def test_repair_comment_without_values_still_returns_text():
     q = Question(id_of_post=1, id_of_question=2, type=BINARY, title="T", url="u")
     assert comment_mod.repair_comment([q]).strip()
     assert comment_mod.repair_comment([]).strip()
+
+
+def test_free_profile_is_selectable_from_the_cli():
+    """config gained a 'free' profile but argparse rejected the name, so the
+    profile was unreachable from the command line and from CI dispatch."""
+    import main as main_mod
+    args = main_mod.parse_args(["--profile", "free"])
+    assert args.profile == "free"
+
+
+def test_free_profile_uses_only_free_models():
+    import importlib, os
+    os.environ["PROFILE"] = "free"
+    from metaculus_bot import config as c
+    importlib.reload(c)
+    try:
+        assert c.models_for_profile(), "free profile has no models"
+        assert all(m.endswith(":free") for m in c.models_for_profile())
+        assert c.SALVAGE_MODEL.endswith(":free")
+        assert c.WEB_PLUGIN_ENABLED is False and c.PERPLEXITY_ENABLED is False
+        assert c.all_models_are_free() is True
+    finally:
+        os.environ.pop("PROFILE", None)
+        importlib.reload(c)

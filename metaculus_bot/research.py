@@ -51,8 +51,10 @@ class ResearchRegistry:
 
         if config.WEB_PLUGIN_ENABLED and config.OPENROUTER_API_KEY:
             self._providers.append(("openrouter-web", self._openrouter_web))
+        if config.PERPLEXITY_ENABLED and config.OPENROUTER_API_KEY:
             # Perplexity Sonar via OpenRouter: a DIFFERENT search index reached
-            # with the SAME key. Cheapest possible source diversity.
+            # with the SAME key. Cheapest source diversity -- but it BILLS, so it
+            # is off on the free profile.
             self._providers.append(("perplexity-sonar", self._perplexity_via_openrouter))
         if config.ASKNEWS_CLIENT_ID and config.ASKNEWS_SECRET:
             self._providers.append(("asknews", self._asknews))
@@ -107,7 +109,10 @@ class ResearchRegistry:
         survey is blunt about the alternative: "agentic researcher with a bunch
         of tools just doesn't work very well compared to dedicated pipelines."
         """
-        if not config.RESEARCH_GAP_FILL or not self._providers or len(first_pass) < 200:
+        # Gap-fill searches through the web plugin, which bills per result, so it
+        # is unavailable when the paid providers are off.
+        if (not config.RESEARCH_GAP_FILL or not config.WEB_PLUGIN_ENABLED
+                or not self._providers or len(first_pass) < 200):
             return ""
         try:
             analysis = await self.llm.complete(
