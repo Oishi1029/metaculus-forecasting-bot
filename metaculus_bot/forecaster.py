@@ -65,7 +65,21 @@ class Forecaster:
         )
 
     async def _one_model(self, model: str, prompt: str) -> str:
-        return await self.llm.complete(model, prompt)
+        """One ensemble member. NO retries.
+
+        llm.complete defaults to 2 retries, i.e. 3 attempts. With the free
+        profile's 420s timeout that is up to 1,260s against a 660s per-question
+        deadline, so ONE slow model took the whole question down and we
+        published nothing -- even when the other model had already answered.
+        Measured live on Fall post 46056, 2026-10-16: repeated
+        "per-question deadline exceeded", 9 failures in 60 runs.
+
+        A dead ensemble member must cost its own vote, never the question: the
+        score is a SUM that is then SQUARED, so a forecast from one model beats
+        no forecast at all by a wide margin. Retrying is the research layer's
+        job, not the ensemble's.
+        """
+        return await self.llm.complete(model, prompt, max_retries=0)
 
     async def _research(self, q: Question) -> tuple[str, list[str]]:
         text, sources = await self.research.gather(q.title, q.resolution_criteria)

@@ -273,3 +273,24 @@ def test_free_profile_uses_only_free_models():
     finally:
         os.environ.pop("PROFILE", None)
         importlib.reload(c)
+
+
+def test_ensemble_members_do_not_retry():
+    """llm.complete defaults to 2 retries. At the free profile's 420s timeout
+    that is up to 1,260s against the per-question deadline, so ONE slow model
+    took the whole question down -- publishing nothing even when the other model
+    had answered. Measured on Fall post 46056: 9 failures in 60 runs.
+    A dead ensemble member must cost its own vote, never the question."""
+    import inspect
+    from metaculus_bot.forecaster import Forecaster
+    src = inspect.getsource(Forecaster._one_model)
+    assert "max_retries=0" in src
+
+
+def test_one_slow_model_still_yields_a_forecast():
+    """The surviving model's answer must be published."""
+    import inspect
+    from metaculus_bot import forecaster
+    src = inspect.getsource(forecaster.Forecaster.forecast_question)
+    assert "return_exceptions=True" in src, "a failing model must not abort the gather"
+    assert "if not texts" in src, "only an EMPTY ensemble may fail the question"

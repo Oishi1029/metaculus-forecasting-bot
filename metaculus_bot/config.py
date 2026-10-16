@@ -194,9 +194,9 @@ WEB_PLUGIN_MAX_RESULTS = _env_int("WEB_PLUGIN_MAX_RESULTS", 5 if PROFILE == "sha
 # workflow's timeout-minutes (18), or a question started just before the run
 # deadline can still be running when GitHub kills the job -- potentially between
 # the forecast POST and the comment POST, leaving an uncommented forecast.
-# 15 + 11 = 26 minutes against a 30-minute job timeout. Enforced by a test.
-RUN_DEADLINE_S = _env_float("RUN_DEADLINE_S", 15 * 60)
-PER_QUESTION_DEADLINE_S = _env_float("PER_QUESTION_DEADLINE_S", 660.0)
+# 16 + 13 = 29 minutes against a 30-minute job timeout. Enforced by a test.
+RUN_DEADLINE_S = _env_float("RUN_DEADLINE_S", 16 * 60)
+PER_QUESTION_DEADLINE_S = _env_float("PER_QUESTION_DEADLINE_S", 780.0)
 MAX_CONCURRENT_QUESTIONS = _env_int("MAX_CONCURRENT_QUESTIONS", 6)
 MAX_QUESTIONS_PER_RUN = _env_int("MAX_QUESTIONS_PER_RUN", 0)  # 0 = no cap
 
