@@ -67,17 +67,28 @@ COMPETITION_MODELS = [
         "openai/gpt-5.6-sol,anthropic/claude-opus-5,google/gemini-3.1-pro-preview",
     ).split(",") if m.strip()
 ]
-# ZERO-COST profile. Verified 2026-09-08 on a real 37k-character forecasting
-# prompt: both models finished cleanly (finish_reason=stop, ~7,670 output tokens)
-# and parsed first time. Three other free models were rejected -- inkling is
-# "agentic harnesses only" (403), gemma-4-31b rate-limited (429), and
-# dots-3-note burned all 16,000 tokens on hidden reasoning and returned ZERO
-# characters. Both survivors are NVIDIA, so vendor diversity is lost; that is
-# the price of $0.
+# ZERO-COST profile. RE-MEASURED 2026-11-02, after
+# "nvidia/nemotron-3-super-120b-a12b:free" was RETIRED from the catalogue: the
+# ensemble silently fell to a single model, and the first time NVIDIA answered
+# 503 ("Service temporarily overloaded") the whole question died. Five live
+# MiniBench runs failed that way before anyone looked.
+# All 13 free ids were re-probed with the REAL forecasting prompt and the REAL
+# parser. These four finished (finish_reason=stop) and parsed first time, at
+# 51s / 102s / 197s / 253s. Still rejected: inkling and inkling-small are
+# "agentic harnesses only" (403); gemma-4 (both sizes) and lfm-2.5 are 429
+# upstream; flint has no upstreams (503); dots-3-note once again spent all
+# 16,000 tokens on hidden reasoning and returned ZERO characters.
+# THREE vendors, where the old pair was both NVIDIA. Single-vendor dependence is
+# precisely what turned one provider blip into a dead run, and vendor diversity
+# is what the bot-maker survey found differentiates scores -- so this is a
+# quality gain, not just a repair.
 FREE_MODELS = [
     m.strip() for m in _env(
         "FREE_MODELS",
-        "nvidia/nemotron-3-ultra-550b-a55b:free,nvidia/nemotron-3-super-120b-a12b:free",
+        "nvidia/nemotron-3-ultra-550b-a55b:free,"
+        "nvidia/nemotron-3.5-super-vl:free,"
+        "cohere/north-mini-code:free,"
+        "xingchen-agi/xing4.0-29b-a4b:free",
     ).split(",") if m.strip()
 ]
 
@@ -89,7 +100,15 @@ SHAKEOUT_MODELS = [
     ).split(",") if m.strip()
 ]
 # Small, cheap model used ONLY to salvage an unparseable forecast block.
-SALVAGE_MODEL = _env("SALVAGE_MODEL", "nvidia/nemotron-3-super-120b-a12b:free"
+# The free default pointed at the retired nemotron-3-super for weeks, so EVERY
+# salvage attempt failed and an unparseable forecast silently became no forecast
+# at all -- the salvage path existed but could not fire.
+# Salvage runs at max_tokens=1200, which is its own trap: measured 2026-11-02,
+# xing4.0 spends that whole ceiling on hidden reasoning and returns ZERO
+# characters, so a strong forecaster is the WRONG choice here. north-mini-code
+# repaired the block in 2.2s and 48 characters; a code-tuned model is the right
+# tool for "re-emit this as valid JSON".
+SALVAGE_MODEL = _env("SALVAGE_MODEL", "cohere/north-mini-code:free"
                      if _env("PROFILE", "competition").lower() == "free"
                      else "google/gemini-3.7-flash")
 
@@ -197,6 +216,22 @@ WEB_PLUGIN_MAX_RESULTS = _env_int("WEB_PLUGIN_MAX_RESULTS", 5 if PROFILE == "sha
 # 16 + 13 = 29 minutes against a 30-minute job timeout. Enforced by a test.
 RUN_DEADLINE_S = _env_float("RUN_DEADLINE_S", 16 * 60)
 PER_QUESTION_DEADLINE_S = _env_float("PER_QUESTION_DEADLINE_S", 780.0)
+
+# Wall-clock budget for ONE ensemble member, retries included.
+# The real distinction is not "retry or not" but "how much time is left".
+# Banning retries outright (the 2026-10-16 fix for a slow model eating the
+# per-question deadline) also banned retrying a 503 that arrived in 0.3s, and
+# that is what killed five live runs on 2026-11-02. A fast transient failure
+# costs almost no time and must be retried; a timeout must not be. A budget
+# expresses both, where a retry count cannot.
+# INVARIANT (enforced by a test): RESEARCH_TIMEOUT_S + MODEL_BUDGET_S must stay
+# under PER_QUESTION_DEADLINE_S with room for salvage, aggregation and the two
+# publish calls. 120 + 540 = 660 against 780 leaves 120s.
+MODEL_BUDGET_S = _env_float("MODEL_BUDGET_S", 540.0)
+# Never START an attempt that cannot plausibly finish. The fastest verified free
+# model answers in ~51s, so a window below this buys nothing but delay.
+MIN_ATTEMPT_S = _env_float("MIN_ATTEMPT_S", 60.0)
+ENSEMBLE_MAX_RETRIES = _env_int("ENSEMBLE_MAX_RETRIES", 2)
 MAX_CONCURRENT_QUESTIONS = _env_int("MAX_CONCURRENT_QUESTIONS", 6)
 MAX_QUESTIONS_PER_RUN = _env_int("MAX_QUESTIONS_PER_RUN", 0)  # 0 = no cap
 

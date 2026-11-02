@@ -275,16 +275,14 @@ def test_free_profile_uses_only_free_models():
         importlib.reload(c)
 
 
-def test_ensemble_members_do_not_retry():
-    """llm.complete defaults to 2 retries. At the free profile's 420s timeout
-    that is up to 1,260s against the per-question deadline, so ONE slow model
-    took the whole question down -- publishing nothing even when the other model
-    had answered. Measured on Fall post 46056: 9 failures in 60 runs.
-    A dead ensemble member must cost its own vote, never the question."""
-    import inspect
-    from metaculus_bot.forecaster import Forecaster
-    src = inspect.getsource(Forecaster._one_model)
-    assert "max_retries=0" in src
+# test_ensemble_members_do_not_retry lived here until 2026-11-02. It asserted
+# `max_retries=0`, which was the right lesson from the wrong half of the
+# evidence: banning retries stopped a slow model eating the per-question
+# deadline, but it also refused to retry an HTTP 503 that arrived in 0.3s, and
+# that killed five consecutive MiniBench runs. The invariant is a wall-clock
+# BUDGET, not an attempt count, and it is pinned from both sides in
+# tests/test_llm_budget.py. Deleting the test was the fix, so it is recorded
+# here rather than silently dropped.
 
 
 def test_one_slow_model_still_yields_a_forecast():

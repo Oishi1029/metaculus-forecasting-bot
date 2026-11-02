@@ -65,21 +65,39 @@ class Forecaster:
         )
 
     async def _one_model(self, model: str, prompt: str) -> str:
-        """One ensemble member. NO retries.
+        """One ensemble member, retried within a fixed wall-clock budget.
 
-        llm.complete defaults to 2 retries, i.e. 3 attempts. With the free
-        profile's 420s timeout that is up to 1,260s against a 660s per-question
-        deadline, so ONE slow model took the whole question down and we
-        published nothing -- even when the other model had already answered.
-        Measured live on Fall post 46056, 2026-10-16: repeated
+        This setting has now failed in BOTH directions, so the reasoning is
+        worth keeping in full.
+
+        Unbounded retries (the original) were 3 attempts x the free profile's
+        420s timeout = up to 1,260s against a 660s per-question deadline. One
+        slow model took the whole question down even when another had already
+        answered. Measured live on Fall post 46056, 2026-10-16: repeated
         "per-question deadline exceeded", 9 failures in 60 runs.
 
-        A dead ensemble member must cost its own vote, never the question: the
-        score is a SUM that is then SQUARED, so a forecast from one model beats
-        no forecast at all by a wide margin. Retrying is the research layer's
-        job, not the ensemble's.
+        Zero retries (the 2026-10-16 fix) then threw away the opposite case. On
+        2026-11-02 NVIDIA answered HTTP 503 "Service temporarily overloaded"
+        after 0.3s; with no retry that instantly-cheap failure killed the
+        question, and because a RETIRED model had quietly halved the ensemble
+        there was no second vote to fall back on. Five consecutive MiniBench
+        runs forecast nothing.
+
+        The variable that actually matters is TIME REMAINING, not attempt count.
+        A 0.3s failure leaves the entire budget intact and must be retried; a
+        420s timeout leaves none and must not be. config.MODEL_BUDGET_S caps the
+        member's total wall clock and llm.complete clamps each attempt to what
+        is left, so a retry can never again eat the question's deadline.
+
+        A dead member must cost its own vote, never the question: the score is a
+        SUM that is then SQUARED, so a forecast from the surviving models beats
+        no forecast by a wide margin.
         """
-        return await self.llm.complete(model, prompt, max_retries=0)
+        return await self.llm.complete(
+            model, prompt,
+            max_retries=config.ENSEMBLE_MAX_RETRIES,
+            budget_s=config.MODEL_BUDGET_S,
+        )
 
     async def _research(self, q: Question) -> tuple[str, list[str]]:
         text, sources = await self.research.gather(q.title, q.resolution_criteria)

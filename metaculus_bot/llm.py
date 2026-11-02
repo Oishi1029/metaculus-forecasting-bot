@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import time
 from typing import Any
 
 import httpx
@@ -55,8 +56,18 @@ class LLMClient:
         max_tokens: int | None = None,
         web_search: bool = False,
         max_retries: int = 2,
+        budget_s: float | None = None,
     ) -> str:
-        """Return the assistant's text. Raises LLMError if every attempt fails."""
+        """Return the assistant's text. Raises LLMError if every attempt fails.
+
+        budget_s caps the TOTAL wall clock for this call, retries included. It
+        exists because a retry count alone cannot tell a 0.3s HTTP 503 apart
+        from a 420s timeout: banning retries to contain the slow case also
+        threw away the cheap case, which is how a provider blip came to kill
+        whole questions. With a budget we retry while there is time and stop
+        when there is not, and each attempt's own timeout is clamped to what
+        remains so a retry can never overrun the caller's deadline.
+        """
         messages: list[dict[str, Any]] = []
         if system:
             messages.append({"role": "system", "content": system})
@@ -78,10 +89,31 @@ class LLMClient:
                 "engine": "native",
             }]
 
+        started = time.monotonic()
+
+        def _left() -> float:
+            if budget_s is None:
+                return float("inf")
+            return budget_s - (time.monotonic() - started)
+
+        def _can_retry(attempt: int, delay: float) -> bool:
+            """Is another attempt worth starting -- and can it finish in time?"""
+            if attempt >= max_retries:
+                return False
+            return _left() > delay + config.MIN_ATTEMPT_S
+
         last: Exception | None = None
         for attempt in range(max_retries + 1):
+            left = _left()
+            if left <= 0:
+                last = last or LLMError(f"{model}: budget of {budget_s:.0f}s exhausted")
+                break
             try:
-                resp = await self._client.post(f"{self.base_url}/chat/completions", json=body)
+                # Clamp this attempt to the remaining budget, so a retry cannot
+                # push the question past its deadline.
+                per_attempt = min(config.LLM_TIMEOUT_S, left)
+                resp = await self._client.post(f"{self.base_url}/chat/completions",
+                                               json=body, timeout=per_attempt)
                 if resp.status_code >= 300:
                     text = (resp.text or "")[:300]
                     # 4xx other than 429 will not improve on retry.
@@ -101,9 +133,9 @@ class LLMClient:
                         if delay is None:
                             delay = min(15.0 * (2 ** attempt), 90.0)
                         log.warning("%s rate-limited (429); waiting %.0fs", model, delay)
-                        if attempt >= max_retries:
+                        if not _can_retry(attempt, delay):
                             raise LLMError(f"{model} rate-limited after "
-                                           f"{max_retries + 1} attempts")
+                                           f"{attempt + 1} attempt(s)")
                         await asyncio.sleep(delay + random.uniform(0, 2.0))
                         continue
                     raise httpx.HTTPError(f"HTTP {resp.status_code}: {text}")
@@ -120,8 +152,11 @@ class LLMClient:
                 raise
             except (httpx.HTTPError, httpx.TimeoutException, ValueError, KeyError) as exc:
                 last = exc
-                if attempt >= max_retries:
+                delay = min(2.0 * (2 ** attempt), 20.0)
+                if not _can_retry(attempt, delay):
                     break
-                await asyncio.sleep(min(2.0 * (2 ** attempt), 20.0) + random.uniform(0, 1.0))
+                log.info("%s attempt %d failed (%s); retrying in %.0fs, %.0fs of "
+                         "budget left", model, attempt + 1, exc, delay, _left())
+                await asyncio.sleep(delay + random.uniform(0, 1.0))
 
-        raise LLMError(f"{model} failed after {max_retries + 1} attempts: {last}")
+        raise LLMError(f"{model} failed after {attempt + 1} attempt(s): {last}")
